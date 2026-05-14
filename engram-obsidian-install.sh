@@ -348,8 +348,14 @@ def root_session_active() -> bool:
 
     Detects 'wsl -u root', 'su -', and 'sudo -i' sessions.
     Reads /proc directly — no subprocess, no utmp dependency.
+
+    Filters to avoid false positives from system/service root shells:
+    - cmdline must look like an interactive invocation (no -c flag, no script path)
+    - tpgid must be >= 0 (terminal has an active foreground process)
     """
     INTERACTIVE_SHELLS = {"bash", "zsh", "sh", "fish", "dash"}
+    # argv[1] values that indicate non-interactive script execution
+    SCRIPT_FLAGS = {b"-c", b"-s"}
     try:
         for pid in os.listdir("/proc"):
             if not pid.isdigit():
@@ -361,12 +367,27 @@ def root_session_active() -> bool:
                             if int(line.split()[1]) != 0:
                                 break
                             with open(f"/proc/{pid}/comm") as fc:
-                                if fc.read().strip() not in INTERACTIVE_SHELLS:
-                                    break
+                                comm = fc.read().strip()
+                            if comm not in INTERACTIVE_SHELLS:
+                                break
+                            # Verify cmdline looks like an interactive shell,
+                            # not a script runner (bash -c '...', sh /path/script, etc.)
+                            with open(f"/proc/{pid}/cmdline", "rb") as fc:
+                                raw = fc.read().rstrip(b"\x00")
+                            argv = raw.split(b"\x00") if raw else [b""]
+                            if len(argv) > 1:
+                                if argv[1] in SCRIPT_FLAGS:
+                                    break  # bash -c '...' or sh -s
+                                if argv[1].startswith(b"/"):
+                                    break  # sh /some/script.sh
                             with open(f"/proc/{pid}/stat") as fs:
                                 stat = fs.read()
-                            tty_nr = int(stat[stat.rfind(")") + 2:].split()[4])
-                            if tty_nr != 0 and ((tty_nr >> 8) & 0xff) == 136:
+                            fields = stat[stat.rfind(")") + 2:].split()
+                            tty_nr = int(fields[4])
+                            tpgid  = int(fields[5])
+                            # pts major = 136; tpgid >= 0 means terminal is active
+                            if tty_nr != 0 and ((tty_nr >> 8) & 0xff) == 136 and tpgid >= 0:
+                                log(f"root session detected: pid={pid} comm={comm} argv={argv[:2]} tty_nr={tty_nr}")
                                 return True
                             break
             except (PermissionError, FileNotFoundError, ValueError):
