@@ -93,26 +93,8 @@ fi
 command -v engram &>/dev/null || die "engram no está disponible después de la instalación"
 echo "[deps] engram instalado"
 
-# 5. engram serve running
-# 5. engram serve en ejecución
-# Read port early (before auto-detection block sets ENGRAM_PORT) — use env var or default 7437
-# Leer el puerto anticipadamente (antes del bloque de auto-detección) — usar variable de entorno o el valor por defecto 7437
-_pre_port="${ENGRAM_PORT:-7437}"
-if ! curl -sf "http://localhost:${_pre_port}/health" --max-time 2 &>/dev/null; then
-    echo "[deps] iniciando engram serve en background..."
-    engram serve &>/dev/null &
-    sleep 2
-    if ! curl -sf "http://localhost:${_pre_port}/health" --max-time 2 &>/dev/null; then
-        warn "engram serve arrancó pero el health check falló — continuando igual"
-    else
-        echo "[deps] engram serve OK"
-    fi
-else
-    echo "[deps] engram serve OK (ya estaba corriendo)"
-fi
-
-# 6. ~/.local/bin in PATH
-# 6. ~/.local/bin en el PATH
+# 5. ~/.local/bin in PATH
+# 5. ~/.local/bin en el PATH
 mkdir -p "$HOME/.local/bin"
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "[deps] agregando ~/.local/bin al PATH en ~/.bashrc y ~/.zshrc..."
@@ -299,15 +281,14 @@ File structure: _engram/{project}/{type}/{date} {title}.md
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import time
-import urllib.request
-import urllib.error
 from datetime import datetime
 from pathlib import Path
 
 # ── Configuration ────────────────────────────────────────────────────────────
-ENGRAM_URL   = "http://localhost:${ENGRAM_PORT}/export"
+DB_PATH      = Path.home() / ".engram" / "engram.db"
 VAULT_DIR    = Path("${VAULT_PATH}")
 ENGRAM_DIR   = VAULT_DIR / "_engram"
 POLL_INTERVAL  = 5  # seconds
@@ -402,16 +383,28 @@ def should_sync() -> bool:
     return obsidian_running() and root_session_active()
 
 
-def fetch_engram() -> dict | None:
-    """Fetch /export from Engram. Returns parsed JSON or None on error."""
-    try:
-        with urllib.request.urlopen(ENGRAM_URL, timeout=10) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.URLError as exc:
-        log(f"WARN Engram API unreachable: {exc.reason}")
+def fetch_engram_sqlite() -> dict | None:
+    """Read observations directly from SQLite. Read-only — never writes to DB."""
+    if not DB_PATH.exists():
+        log(f"WARN DB not found: {DB_PATH}")
         return None
-    except (json.JSONDecodeError, Exception) as exc:
-        log(f"WARN Engram API error: {exc}")
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro&timeout=5", uri=True)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, ifnull(sync_id,'') as sync_id, session_id, type, title,
+                   content, tool_name, project, scope, topic_key,
+                   revision_count, duplicate_count, last_seen_at,
+                   created_at, updated_at, deleted_at
+            FROM observations
+            ORDER BY id
+        """)
+        observations = [dict(row) for row in cur.fetchall()]
+        conn.close()
+        return {"observations": observations, "sessions": [], "prompts": []}
+    except sqlite3.OperationalError as exc:
+        log(f"WARN SQLite error: {exc}")
         return None
 
 
@@ -454,8 +447,8 @@ def detect_windows_locale() -> str:
 MONTH_NAMES = MONTH_NAMES_BY_LANG.get(detect_windows_locale(), MONTH_NAMES_BY_LANG["en"])
 
 
-def write_observation(obs: dict, base_dir: Path) -> None:
-    """Write a single observation as a Markdown file."""
+def write_observation(obs: dict, base_dir: Path) -> str | None:
+    """Write a single observation as a Markdown file. Returns vault-relative path (no .md) or None."""
     project   = sanitize(obs.get("project") or "unknown")
     obs_type  = sanitize(obs.get("type")    or "unknown")
     title     = obs.get("title", "untitled")
@@ -475,11 +468,13 @@ def write_observation(obs: dict, base_dir: Path) -> None:
     dest_dir = base_dir / project / year / month_dir / obs_type
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    scope     = obs.get("scope", "")
-    topic_key = obs.get("topic_key", "")
-    updated   = (obs.get("updated_at") or "")[:10]
-    obs_id    = obs.get("id", "")
-    content   = obs.get("content", "")
+    scope          = obs.get("scope", "")
+    topic_key      = obs.get("topic_key", "")
+    updated        = (obs.get("updated_at") or "")[:10]
+    obs_id         = obs.get("id", "")
+    content        = obs.get("content", "")
+    session_id     = obs.get("session_id") or ""
+    revision_count = obs.get("revision_count") or 0
 
     tags = ["engram", obs_type, project]
 
@@ -490,14 +485,37 @@ def write_observation(obs: dict, base_dir: Path) -> None:
         f"project: {project}\n"
         f"scope: {scope}\n"
         f"topic_key: {topic_key}\n"
+        f"session_id: {session_id}\n"
+        f"revision_count: {revision_count}\n"
         f"created: {created}\n"
         f"updated: {updated}\n"
         f"tags: [{', '.join(tags)}]\n"
+        f"aliases:\n"
+        f"  - \"{title.replace(chr(34), chr(39))}\"\n"
         "---\n"
     )
 
-    md = f"{frontmatter}\n> [[{project}/{project}|{project}]]\n\n# {title}\n\n{content}\n"
-    (dest_dir / filename).write_text(md, encoding="utf-8")
+    links = [f"[[_engram/{project}/{project}|{project}]]"]
+    if created:
+        links.append(f"[[_engram/{project}/{year}/{year}|{year}]]")
+        links.append(f"[[_engram/{project}/{year}/{month_dir}/{month_dir}|{month_dir}]]")
+    if session_id:
+        links.append(f"[[_engram/_sessions/session-{session_id}|session]]")
+    topic_key_val = obs.get("topic_key") or ""
+    if topic_key_val:
+        prefix = "--".join(topic_key_val.split("/")[:2])
+        links.append(f"[[_engram/_topics/{prefix}|{prefix}]]")
+
+    links_line = "  ".join(f"> {lk}" for lk in links)
+    md = f"{frontmatter}\n{links_line}\n\n# {title}\n\n{content}\n"
+
+    dest_path = dest_dir / filename
+    dest_path.write_text(md, encoding="utf-8")
+    try:
+        rel = dest_path.relative_to(base_dir.parent)
+        return str(rel.with_suffix("")).replace("\\", "/")
+    except ValueError:
+        return None
 
 
 def write_year_index(project: str, year: str, months_data: dict, base_dir: Path) -> None:
@@ -670,12 +688,134 @@ def write_index(data: dict, base_dir: Path, total: int) -> None:
                     log(f"WARN could not write {proj}/{year}/{month_dir}/{month_dir}.md: {exc}")
 
 
+def write_session_hubs(written: list, base_dir: Path) -> None:
+    """Create one hub note per session listing all its observations."""
+    from collections import defaultdict
+    by_session: dict[str, list] = defaultdict(list)
+    for obs, rel_path in written:
+        sid = obs.get("session_id") or ""
+        if sid:
+            by_session[sid].append((obs, rel_path))
+
+    sessions_dir = base_dir / "_sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+
+    for sid, entries in by_session.items():
+        project_hint = sanitize(entries[0][0].get("project") or "unknown")
+        lines = [
+            "---",
+            f"tags: [engram, session, {project_hint}]",
+            "---",
+            "",
+            f"# Session {sid[:8]}",
+            "",
+            f"{len(entries)} observations",
+            "",
+        ]
+        for obs, rel_path in sorted(entries, key=lambda x: x[0].get("created_at") or ""):
+            title = obs.get("title", "untitled")
+            obs_type = obs.get("type", "unknown")
+            created = (obs.get("created_at") or "")[:10]
+            lines.append(f"- [[{rel_path}|{title}]] — {obs_type} — {created}")
+        lines.append("")
+        (sessions_dir / f"session-{sid}.md").write_text("\n".join(lines), encoding="utf-8")
+
+    log(f"Session hubs written: {len(by_session)}")
+
+
+def write_topic_hubs(written: list, base_dir: Path) -> None:
+    """Create one hub note per topic_key prefix with >=2 observations."""
+    from collections import defaultdict
+    by_prefix: dict[str, list] = defaultdict(list)
+    for obs, rel_path in written:
+        tk = obs.get("topic_key") or ""
+        if tk:
+            prefix = "--".join(tk.split("/")[:2])
+            by_prefix[prefix].append((obs, rel_path))
+
+    topics_dir = base_dir / "_topics"
+    topics_dir.mkdir(parents=True, exist_ok=True)
+
+    written_count = 0
+    for prefix, entries in by_prefix.items():
+        if len(entries) < 2:
+            continue  # singletons: no hub (evita clutter)
+        projects = sorted({sanitize(o.get("project") or "unknown") for o, _ in entries})
+        lines = [
+            "---",
+            f"tags: [engram, topic, {', '.join(projects)}]",
+            "---",
+            "",
+            f"# {prefix}",
+            "",
+            f"{len(entries)} observations across {len(projects)} project(s)",
+            "",
+        ]
+        for obs, rel_path in sorted(entries, key=lambda x: x[0].get("created_at") or ""):
+            title = obs.get("title", "untitled")
+            proj = sanitize(obs.get("project") or "unknown")
+            created = (obs.get("created_at") or "")[:10]
+            lines.append(f"- [[{rel_path}|{title}]] — {proj} — {created}")
+        lines.append("")
+        (topics_dir / f"{prefix}.md").write_text("\n".join(lines), encoding="utf-8")
+        written_count += 1
+
+    log(f"Topic hubs written: {written_count} (skipped {len(by_prefix) - written_count} singletons)")
+
+
+def write_graph_config() -> None:
+    """Write Obsidian graph.json with engram-brain color groups and physics."""
+    import json as _json
+
+    obsidian_dir = VAULT_DIR / ".obsidian"
+    obsidian_dir.mkdir(parents=True, exist_ok=True)
+    graph_path = obsidian_dir / "graph.json"
+
+    config = {
+        "collapse-filter": True,
+        "search": "",
+        "showTags": False,
+        "showAttachments": False,
+        "hideUnresolved": False,
+        "showOrphans": True,
+        "collapse-color-groups": False,
+        "colorGroups": [
+            {"query": "path:_engram/_sessions", "color": {"a": 1, "rgb": int("E0CBD2", 16)}},
+            {"query": "path:_engram/_topics",   "color": {"a": 1, "rgb": int("D3FFFF", 16)}},
+            {"query": "tag:#architecture",       "color": {"a": 1, "rgb": int("001EFF", 16)}},
+            {"query": "tag:#bugfix",             "color": {"a": 1, "rgb": int("FF0000", 16)}},
+            {"query": "tag:#decision",           "color": {"a": 1, "rgb": int("00FF2A", 16)}},
+            {"query": "tag:#pattern",            "color": {"a": 1, "rgb": int("FF6800", 16)}},
+        ],
+        "collapse-display": True,
+        "showArrow": False,
+        "textFadeMultiplier": 0,
+        "nodeSizeMultiplier": 1,
+        "lineSizeMultiplier": 1,
+        "collapse-forces": True,
+        "centerStrength": 0.515,
+        "repelStrength": 12.71,
+        "linkStrength": 0.729,
+        "linkDistance": 207,
+        "scale": 1,
+        "close": False,
+    }
+
+    graph_path.write_text(_json.dumps(config, indent=2), encoding="utf-8")
+    log(f"Graph config written: {graph_path}")
+
+
 def sync_to_vault() -> None:
     """Fetch Engram data and write all files under ENGRAM_DIR."""
+    try:
+        write_graph_config()
+    except Exception as exc:
+        log(f"WARN could not write graph config: {exc}")
+
     log("Syncing Engram — Obsidian...")
-    data = fetch_engram()
+    data = fetch_engram_sqlite()
     if data is None:
-        log("Sync aborted: could not reach Engram API")
+        log("Sync aborted: could not read Engram DB")
         return
 
     observations = data.get("observations", [])
@@ -688,9 +828,12 @@ def sync_to_vault() -> None:
         shutil.rmtree(ENGRAM_DIR)
     ENGRAM_DIR.mkdir(parents=True, exist_ok=True)
 
+    written = []  # list of (obs_dict, vault_relative_path_str)
     for obs in observations:
         try:
-            write_observation(obs, ENGRAM_DIR)
+            rel_path = write_observation(obs, ENGRAM_DIR)
+            if rel_path:
+                written.append((obs, rel_path))
         except Exception as exc:
             log(f"WARN skipping obs id={obs.get('id')}: {exc}")
 
@@ -699,7 +842,17 @@ def sync_to_vault() -> None:
     except Exception as exc:
         log(f"WARN could not write _index.md: {exc}")
 
-    log(f"Sync complete — {total} notes written to {ENGRAM_DIR}")
+    try:
+        write_session_hubs(written, ENGRAM_DIR)
+    except Exception as exc:
+        log(f"WARN could not write session hubs: {exc}")
+
+    try:
+        write_topic_hubs(written, ENGRAM_DIR)
+    except Exception as exc:
+        log(f"WARN could not write topic hubs: {exc}")
+
+    log(f"Sync complete — {total} notes written, {len(written)} indexed for hubs to {ENGRAM_DIR}")
 
 
 def cleanup_vault() -> None:
@@ -709,6 +862,10 @@ def cleanup_vault() -> None:
         log(f"Cleaned up {ENGRAM_DIR}")
     else:
         log("Nothing to clean up (_engram/ not present)")
+    graph_path = VAULT_DIR / ".obsidian" / "graph.json"
+    if graph_path.exists():
+        graph_path.unlink()
+        log(f"Removed graph config: {graph_path}")
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -718,28 +875,39 @@ def main() -> None:
     log(f"Vault: {VAULT_DIR}")
     log(f"Poll interval: {POLL_INTERVAL}s")
 
-    # Bootstrap: detect current state without triggering a transition
-    # Bootstrap: detectar el estado actual sin disparar una transición
-    was_running = should_sync()
-    if was_running:
-        log("Obsidian running + root session active — initial sync")
+    was_synced = False
+    cleanup_countdown = 0
+    CLEANUP_CONFIRM = 2  # confirmar 2 polls consecutivos antes de limpiar
+
+    if should_sync():
+        log("Conditions MET (Obsidian + root) — initial sync")
         sync_to_vault()
+        was_synced = True
     else:
         log("Conditions not met — standby")
 
     while True:
         time.sleep(POLL_INTERVAL)
-        is_running = should_sync()
+        conditions_met = should_sync()
 
-        if not was_running and is_running:
+        if not was_synced and conditions_met:
             log("Conditions MET (Obsidian + root) — syncing")
             sync_to_vault()
+            was_synced = True
+            cleanup_countdown = 0
 
-        elif was_running and not is_running:
-            log("Conditions no longer met — cleaning up")
-            cleanup_vault()
+        elif was_synced and not conditions_met:
+            cleanup_countdown += 1
+            if cleanup_countdown >= CLEANUP_CONFIRM:
+                log(f"Conditions gone for {cleanup_countdown} polls — cleaning up")
+                cleanup_vault()
+                was_synced = False
+                cleanup_countdown = 0
+            else:
+                log(f"Conditions not met ({cleanup_countdown}/{CLEANUP_CONFIRM}) — waiting to confirm")
 
-        was_running = is_running
+        else:
+            cleanup_countdown = 0
 
 
 if __name__ == "__main__":
