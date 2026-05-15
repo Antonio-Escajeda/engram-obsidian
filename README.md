@@ -32,7 +32,6 @@ engram-obsidian/
 │       └── daemon/
 │           ├── process.go   ObsidianRunning (tasklist.exe) · RootSessionActive (/proc)
 │           └── daemon.go    loop: poll → sync → cleanup
-├── engram-obsidian-install.sh   instalador del daemon Python (versión anterior)
 └── .gitignore
 ```
 
@@ -48,9 +47,7 @@ engram-obsidian/
 ## Instalación
 
 ```bash
-cd engram-obsidian
-go build ./cmd/engram-obsidian/
-cp engram-obsidian ~/.local/bin/engram-obsidian
+go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@latest
 ```
 
 Servicio systemd (`~/.config/systemd/user/engram-obsidian.service`):
@@ -60,7 +57,7 @@ Servicio systemd (`~/.config/systemd/user/engram-obsidian.service`):
 Description=Engram → Obsidian Memory Sync
 
 [Service]
-ExecStart=%h/.local/bin/engram-obsidian --daemon --interval 10m
+ExecStart=%h/go/bin/engram-obsidian --daemon --interval 10m
 Restart=on-failure
 
 [Install]

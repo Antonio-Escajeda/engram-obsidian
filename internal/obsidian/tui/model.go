@@ -3,8 +3,8 @@ package tui
 import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/Gentleman-Programming/engram-obsidian/internal/obsidian"
-	"github.com/Gentleman-Programming/engram-obsidian/internal/store"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
 )
 
 // Screen identifica la pantalla activa.

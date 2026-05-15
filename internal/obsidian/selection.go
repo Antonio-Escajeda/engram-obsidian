@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Gentleman-Programming/engram-obsidian/internal/store"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
 )
 
 // SelectionMode indica si un nodo está seleccionado completo o parcialmente.

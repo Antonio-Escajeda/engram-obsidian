@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Gentleman-Programming/engram-obsidian/internal/store"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
 )
 
 var monthNames = []string{

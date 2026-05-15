@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Gentleman-Programming/engram-obsidian/internal/obsidian"
-	"github.com/Gentleman-Programming/engram-obsidian/internal/obsidian/daemon"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian/daemon"
 )
 
 const version = "0.1.0"

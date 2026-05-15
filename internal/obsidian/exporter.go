@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Gentleman-Programming/engram-obsidian/internal/store"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
 )
 
 // defaultStateFilePath retorna el path del state file fuera del vault,

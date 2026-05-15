@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/Gentleman-Programming/engram-obsidian/internal/obsidian"
-	"github.com/Gentleman-Programming/engram-obsidian/internal/store"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
 )
 
 // NodeKind clasifica el tipo de nodo en el árbol.

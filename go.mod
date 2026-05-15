@@ -1,4 +1,4 @@
-module github.com/Gentleman-Programming/engram-obsidian
+module github.com/Antonio-Escajeda/engram-obsidian
 
 go 1.22
 

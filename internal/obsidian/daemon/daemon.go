@@ -8,9 +8,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/Gentleman-Programming/engram-obsidian/internal/obsidian"
-	"github.com/Gentleman-Programming/engram-obsidian/internal/obsidian/tui"
-	"github.com/Gentleman-Programming/engram-obsidian/internal/store"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian/tui"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
 )
 
 const cleanupConfirmPolls = 2
