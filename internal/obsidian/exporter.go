@@ -230,7 +230,7 @@ func (e *Exporter) writeIndexes(obs []store.Observation, filter func(store.Obser
 			}
 		}
 		fmt.Fprintf(&rootSb, "- [[%s|%s]] (%d memorias)\n",
-			filepath.Join(engramRoot, proj, proj), proj, total)
+			filepath.Join(engramRoot, proj, "📁 "+proj), proj, total)
 	}
 	_ = os.WriteFile(filepath.Join(engramAbs, "_index.md"), []byte(rootSb.String()), 0644)
 
@@ -258,7 +258,7 @@ func (e *Exporter) writeIndexes(obs []store.Observation, filter func(store.Obser
 			projSb.WriteString("\n")
 			_ = yearTotal // already used for root index
 		}
-		projFile := filepath.Join(projDir, proj+".md")
+		projFile := filepath.Join(projDir, "📁 "+proj+".md")
 		_ = os.WriteFile(projFile, []byte(projSb.String()), 0644)
 
 		// Year and month indexes
@@ -273,7 +273,7 @@ func (e *Exporter) writeIndexes(obs []store.Observation, filter func(store.Obser
 			var yearSb strings.Builder
 			fmt.Fprintf(&yearSb, "---\ntags: [engram, index, year]\n---\n\n# %s / %s\n\n[[%s|← %s]]\n\n",
 				proj, year,
-				filepath.Join(engramRoot, proj, proj), proj)
+				filepath.Join(engramRoot, proj, "📁 "+proj), proj)
 			for month, mObs := range months {
 				fmt.Fprintf(&yearSb, "## %s\n\n", month)
 				fmt.Fprintf(&yearSb, "- [[%s|%s]] — %d memorias\n\n",

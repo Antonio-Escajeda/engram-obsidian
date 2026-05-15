@@ -95,7 +95,7 @@ func ObservationToMarkdown(obs store.Observation, relPath string, engramRoot str
 	} else if year != "sin-fecha" {
 		fmt.Fprintf(&sb, "> [[%s|%s]]  \n\n", filepath.Join(engramRoot, project, year, year), year)
 	} else {
-		fmt.Fprintf(&sb, "> [[%s|%s]]  \n\n", filepath.Join(engramRoot, project, project), project)
+		fmt.Fprintf(&sb, "> [[%s|%s]]  \n\n", filepath.Join(engramRoot, project, "📁 "+project), project)
 	}
 
 	// Contenido
