@@ -9,6 +9,24 @@ import (
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
 )
 
+// removeEmptyDirs elimina recursivamente directorios vacíos dentro de root.
+// No elimina root en sí mismo.
+func removeEmptyDirs(root string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub := filepath.Join(root, e.Name())
+		removeEmptyDirs(sub)
+		// Intentar borrar — solo tiene efecto si quedó vacío.
+		_ = os.Remove(sub)
+	}
+}
+
 // defaultStateFilePath retorna el path del state file fuera del vault,
 // en ~/.engram/obsidian-sync-state.json, para que Cleanup() no lo borre.
 func defaultStateFilePath() string {
@@ -148,8 +166,41 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 		}
 	}
 
-	// Generar índices
+	// Generar índices solo para los proyectos activos.
 	e.writeIndexes(data.Observations, filter, engramRoot, engramAbs)
+
+	// Sweep de índices: eliminar subdirectorios de proyectos que ya no están activos.
+	// Los archivos de observaciones individuales ya fueron borrados arriba (sweep de state.Files).
+	// Pero los directorios de proyecto (_engram/{proj}/) y sus índices internos
+	// nunca están en state.Files, así que hay que barrerlos por separado.
+	activeProjects := map[string]bool{}
+	for _, obs := range data.Observations {
+		if obs.IsDeleted() {
+			continue
+		}
+		if filter != nil && !filter(obs) {
+			continue
+		}
+		activeProjects[sanitize(obs.ProjectName())] = true
+	}
+	if entries, err := os.ReadDir(engramAbs); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			if !activeProjects[entry.Name()] {
+				staleDir := filepath.Join(engramAbs, entry.Name())
+				if err := os.RemoveAll(staleDir); err != nil {
+					e.logf("WARN delete stale project dir %s: %v", staleDir, err)
+				} else {
+					e.logf("Removed stale project dir: %s", entry.Name())
+				}
+			}
+		}
+	}
+
+	// Eliminar directorios vacíos que hayan quedado luego del sweep.
+	removeEmptyDirs(engramAbs)
 
 	// Persistir state
 	if err := WriteState(e.stateFilePath(), state); err != nil {
