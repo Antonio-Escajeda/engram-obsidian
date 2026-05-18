@@ -46,7 +46,13 @@ engram-obsidian/
 
 ## Instalación
 
-Cloná el repo y corré el script de instalación:
+### Sin clonar el repo (recomendado para usuarios nuevos)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Antonio-Escajeda/engram-obsidian/main/install.sh | bash
+```
+
+### Desde el repo local
 
 ```bash
 git clone https://github.com/Antonio-Escajeda/engram-obsidian.git
@@ -54,11 +60,11 @@ cd engram-obsidian
 ./install.sh
 ```
 
-El script:
+El script es idempotente — funciona tanto para instalación nueva como para actualización:
 - Crea `~/.local/bin/` si no existe
-- Compila el binario desde el repo local y lo instala en `~/.local/bin/engram-obsidian`
+- Si está en el repo local, compila con `go build`; si no, instala con `go install` remoto
 - Escribe el service file de systemd en `~/.config/systemd/user/`
-- Habilita e inicia el servicio automáticamente
+- Habilita e inicia el servicio (o lo reinicia si ya estaba activo)
 - Al terminar muestra el estado del servicio
 
 Si es la primera vez, el script te recuerda correr `engram-obsidian --select` para configurar el vault.
@@ -90,9 +96,11 @@ engram-obsidian --select
 ```
 
 En la pantalla de configuración:
-- **Vault path**: presioná `b` para abrir el selector de carpetas de Windows
+- **Vault path**: se pre-rellena automáticamente con la carpeta `Documents` del usuario Windows actual (detectado via `wslvar USERPROFILE`). Podés confirmarlo o cambiarlo; también podés presionar `b` para abrir el selector de carpetas de Windows
 - **DB path**: path a `~/.engram/engram.db`
 - `Tab` para navegar entre campos · `Enter` para continuar a la selección
+
+> **Nota:** la detección automática del vault path solo ocurre en el primer uso. Si ya existe config guardada en `~/.engram/obsidian-selection.json`, se respeta sin sobreescribir.
 
 ### Selección de proyectos
 
