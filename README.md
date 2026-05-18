@@ -46,42 +46,33 @@ engram-obsidian/
 
 ## Instalación
 
-```bash
-GOBIN=~/.local/bin go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@latest
-```
-
-Creá el service file de systemd:
+Cloná el repo y corré el script de instalación:
 
 ```bash
-cat > ~/.config/systemd/user/engram-obsidian.service << 'EOF'
-[Unit]
-Description=Engram → Obsidian Memory Sync
-After=default.target
-
-[Service]
-ExecStart=%h/.local/bin/engram-obsidian --daemon --interval 10m
-Restart=on-failure
-RestartSec=10s
-
-[Install]
-WantedBy=default.target
-EOF
+git clone https://github.com/Antonio-Escajeda/engram-obsidian.git
+cd engram-obsidian
+./install.sh
 ```
 
-Habilitá y arrancá el servicio:
+El script:
+- Crea `~/.local/bin/` si no existe
+- Compila el binario desde el repo local y lo instala en `~/.local/bin/engram-obsidian`
+- Escribe el service file de systemd en `~/.config/systemd/user/`
+- Habilita e inicia el servicio automáticamente
+- Al terminar muestra el estado del servicio
 
-```bash
-systemctl --user daemon-reload
-systemctl --user enable engram-obsidian
-systemctl --user start engram-obsidian
-```
+Si es la primera vez, el script te recuerda correr `engram-obsidian --select` para configurar el vault.
 
 ### Para actualizar
 
+Desde el directorio del repo:
+
 ```bash
-GOBIN=~/.local/bin go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@latest
-systemctl --user restart engram-obsidian
+git pull
+./install.sh
 ```
+
+El script detecta que el servicio ya está activo y lo reinicia automáticamente.
 
 ## Uso
 
