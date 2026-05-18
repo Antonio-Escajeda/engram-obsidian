@@ -35,9 +35,17 @@ func ObsidianRunning(cfg ProcessConfig) (bool, error) {
 
 // RootSessionActive devuelve true si hay una sesión root interactiva en un pts device.
 // Lee /proc directamente sin subprocesos.
+//
+// Criterios para considerar "sesión root interactiva":
+//   - UID real == 0
+//   - El proceso es un shell conocido (bash, zsh, sh, fish, dash)
+//   - No es un shell ejecutando un script (argv[1] es un path o flag -c/-s)
+//   - Está asociado a un pts device (major 136) con tpgid > 0
+//     (tpgid > 0, no >= 0, para descartar procesos con terminal pero sin fg group activo)
 func RootSessionActive() bool {
 	interactiveShells := map[string]bool{"bash": true, "zsh": true, "sh": true, "fish": true, "dash": true}
-	scriptFlags := [][]byte{[]byte("-c"), []byte("-s")}
+	// Flags que indican shell no-interactivo
+	nonInteractiveFlags := map[string]bool{"-c": true, "-s": true, "-i": true}
 
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -53,7 +61,7 @@ func RootSessionActive() bool {
 			continue
 		}
 
-		// Verificar UID == 0
+		// Verificar UID real == 0 (campo Uid: en /proc/PID/status)
 		status, err := os.ReadFile("/proc/" + pid + "/status")
 		if err != nil {
 			continue
@@ -63,7 +71,7 @@ func RootSessionActive() bool {
 			continue
 		}
 
-		// Verificar que sea un shell interactivo
+		// Verificar que sea un shell conocido
 		commBytes, err := os.ReadFile("/proc/" + pid + "/comm")
 		if err != nil {
 			continue
@@ -73,35 +81,34 @@ func RootSessionActive() bool {
 			continue
 		}
 
-		// Verificar cmdline (no es -c ni script)
+		// Verificar cmdline: descartar shells no-interactivos
 		cmdlineBytes, err := os.ReadFile("/proc/" + pid + "/cmdline")
 		if err != nil {
 			continue
 		}
 		argv := splitNull(cmdlineBytes)
-		if len(argv) > 1 {
-			skip := false
-			for _, flag := range scriptFlags {
-				if string(argv[1]) == string(flag) {
-					skip = true
-					break
-				}
-			}
-			if skip {
+		if len(argv) > 1 && len(argv[1]) > 0 {
+			arg1 := string(argv[1])
+			// Es un flag no-interactivo (-c, -s, -i cuando va con argumento)
+			if nonInteractiveFlags[arg1] {
 				continue
 			}
-			if len(argv[1]) > 0 && argv[1][0] == '/' {
-				continue // es un script
+			// Es un path absoluto o relativo a un script
+			// Un path relativo no empieza con '-' ni es vacío
+			if arg1[0] == '/' || (arg1[0] != '-' && strings.ContainsAny(arg1, "./")) {
+				continue
 			}
 		}
 
-		// Verificar tty pts (major 136) con tpgid >= 0
+		// Verificar tty pts (major 136) con tpgid > 0
+		// tpgid > 0 garantiza que hay un proceso en foreground activo en la terminal.
+		// tpgid == 0 o < 0 indica sin terminal o terminal sin fg group.
 		statBytes, err := os.ReadFile("/proc/" + pid + "/stat")
 		if err != nil {
 			continue
 		}
 		ttyNr, tpgid := parseTTY(string(statBytes))
-		if ttyNr != 0 && (ttyNr>>8)&0xff == 136 && tpgid >= 0 {
+		if ttyNr != 0 && (ttyNr>>8)&0xff == 136 && tpgid > 0 {
 			return true
 		}
 	}

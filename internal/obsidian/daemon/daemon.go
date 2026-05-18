@@ -73,12 +73,20 @@ func (d *Daemon) RunOnce() error {
 func (d *Daemon) Run(ctx context.Context) error {
 	d.cfg.Logf("engram-obsidian daemon starting (poll: %s, sync interval: %s)", d.cfg.PollInterval, d.cfg.SyncInterval)
 
-	wasSynced := false
+	// wasSynced refleja si este proceso creó contenido en el vault.
+	// Al arrancar, se inicializa en true si el vault ya tiene contenido
+	// (puede ocurrir si el daemon fue reiniciado con el vault aún poblado).
+	wasSynced := d.vaultHasContent()
+	if wasSynced {
+		d.cfg.Logf("Vault content detected on startup — will enforce cleanup if conditions not met")
+	}
+
 	cleanupCountdown := 0
 	var lastSync time.Time
 
-	// Bootstrap: sincronizar inmediatamente si condiciones activas
-	if ShouldSync(d.cfg.Process) {
+	// Bootstrap: evaluar condiciones y actuar en consecuencia.
+	conditionsMet := ShouldSync(d.cfg.Process)
+	if conditionsMet {
 		if d.cfg.DaemonMode {
 			d.cfg.Logf("Conditions MET on startup — syncing (daemon mode)")
 			if err := d.syncOnly(); err != nil {
@@ -98,6 +106,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 				lastSync = time.Now()
 			}
 		}
+	} else if wasSynced {
+		// Condiciones no se cumplen pero hay vault huérfano → limpiar inmediatamente.
+		d.cfg.Logf("Conditions not met on startup but vault has content — cleaning up orphan vault")
+		d.cleanup()
+		wasSynced = false
 	} else {
 		d.cfg.Logf("Conditions not met — standby")
 	}
@@ -115,7 +128,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return ctx.Err()
 
 		case <-ticker.C:
-			conditionsMet := ShouldSync(d.cfg.Process)
+			// Evaluar condiciones UNA sola vez por tick para evitar
+			// dobles llamadas a ObsidianRunning() (tasklist.exe es costoso).
+			conditionsMet = ShouldSync(d.cfg.Process)
 
 			if !wasSynced && conditionsMet {
 				if d.cfg.DaemonMode {
@@ -140,9 +155,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 					}
 				}
 
-			} else if wasSynced && ShouldCleanup(d.cfg.Process) {
+			} else if wasSynced && !conditionsMet {
+				// Usar !conditionsMet en vez de ShouldCleanup() para evitar
+				// una segunda llamada a ObsidianRunning() en el mismo tick.
 				cleanupCountdown++
-				d.cfg.Logf("Obsidian closed (%d/%d) — waiting to confirm", cleanupCountdown, cleanupConfirmPolls)
+				d.cfg.Logf("Conditions lost (%d/%d) — waiting to confirm cleanup", cleanupCountdown, cleanupConfirmPolls)
 				if cleanupCountdown >= cleanupConfirmPolls {
 					d.cfg.Logf("Cleaning up vault")
 					d.cleanup()
@@ -269,6 +286,19 @@ func (d *Daemon) cleanup() {
 	if err := exp.Cleanup(); err != nil {
 		d.cfg.Logf("WARN cleanup: %v", err)
 	}
+}
+
+// vaultHasContent devuelve true si el directorio _engram/ del vault ya existe
+// con contenido. Se usa al iniciar para detectar vaults huérfanos de ejecuciones
+// anteriores y forzar cleanup si las condiciones no se cumplen.
+func (d *Daemon) vaultHasContent() bool {
+	sel, err := obsidian.LoadSelection(d.cfg.SelectionPath)
+	if err != nil || !sel.HasConfig() {
+		return false
+	}
+	exp := obsidian.NewExporter(sel.Config.VaultPath, d.cfg.Logf)
+	info, err := os.Stat(exp.EngramRoot())
+	return err == nil && info.IsDir()
 }
 
 func defaultDBPath() string {
