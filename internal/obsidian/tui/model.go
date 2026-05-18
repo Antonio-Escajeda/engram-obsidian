@@ -50,9 +50,11 @@ func New(sel *obsidian.Selection, observations []store.Observation) Model {
 	dbInput.Placeholder = "~/.engram/engram.db"
 	dbInput.CharLimit = 256
 
-	// Si ya hay config, pre-llenar
+	// Si ya hay config guardada, pre-llenar. Si no, detectar vault path en WSL2.
 	if sel.Config.VaultPath != "" {
 		vaultInput.SetValue(sel.Config.VaultPath)
+	} else if detected := obsidian.DetectWSLVaultPath(); detected != "" {
+		vaultInput.SetValue(detected)
 	}
 	if sel.Config.DBPath != "" {
 		dbInput.SetValue(sel.Config.DBPath)
