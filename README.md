@@ -47,25 +47,40 @@ engram-obsidian/
 ## Instalación
 
 ```bash
-go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@latest
+GOBIN=~/.local/bin go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@latest
 ```
 
-Servicio systemd (`~/.config/systemd/user/engram-obsidian.service`):
+Creá el service file de systemd:
 
-```ini
+```bash
+cat > ~/.config/systemd/user/engram-obsidian.service << 'EOF'
 [Unit]
 Description=Engram → Obsidian Memory Sync
+After=default.target
 
 [Service]
-ExecStart=%h/go/bin/engram-obsidian --daemon --interval 10m
+ExecStart=%h/.local/bin/engram-obsidian --daemon --interval 10m
 Restart=on-failure
+RestartSec=10s
 
 [Install]
 WantedBy=default.target
+EOF
 ```
 
+Habilitá y arrancá el servicio:
+
 ```bash
-systemctl --user enable --now engram-obsidian.service
+systemctl --user daemon-reload
+systemctl --user enable engram-obsidian
+systemctl --user start engram-obsidian
+```
+
+### Para actualizar
+
+```bash
+GOBIN=~/.local/bin go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@latest
+systemctl --user restart engram-obsidian
 ```
 
 ## Uso
