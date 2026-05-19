@@ -22,7 +22,7 @@ func Open(dbPath string) (*Reader, error) {
 		home, _ := os.UserHomeDir()
 		dbPath = filepath.Join(home, dbPath[2:])
 	}
-	dsn := fmt.Sprintf("file:%s?mode=ro&_timeout=5000", dbPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=query_only(1)", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)

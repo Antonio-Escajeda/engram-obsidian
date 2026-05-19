@@ -152,8 +152,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else if wasSynced {
 		// Condiciones no se cumplen pero hay vault huérfano → limpiar inmediatamente.
 		d.cfg.Logf("Conditions not met on startup but vault has content — cleaning up orphan vault")
-		d.cleanup()
-		wasSynced = false
+		if d.cleanup() {
+			wasSynced = false
+		}
 	} else {
 		d.cfg.Logf("Conditions not met — standby")
 	}
@@ -166,7 +167,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			d.cfg.Logf("Context cancelled — shutting down")
 			if wasSynced || d.vaultHasContent() {
-				d.cleanup()
+				if !d.cleanup() {
+					d.cfg.Logf("WARN shutdown cleanup: could not resolve selection, vault may be orphaned")
+				}
 			}
 			return ctx.Err()
 
@@ -205,9 +208,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 				d.cfg.Logf("Conditions lost (%d/%d) — waiting to confirm cleanup", cleanupCountdown, cleanupConfirmPolls)
 				if cleanupCountdown >= cleanupConfirmPolls {
 					d.cfg.Logf("Cleaning up vault")
-					d.cleanup()
-					wasSynced = false
-					cleanupCountdown = 0
+					if d.cleanup() {
+						wasSynced = false
+						cleanupCountdown = 0
+					}
 				}
 
 			} else if wasSynced && conditionsMet {
@@ -321,15 +325,18 @@ func (d *Daemon) doSync(sel *obsidian.Selection) (bool, error) {
 }
 
 // cleanup elimina _engram/ y graph.json del vault.
-func (d *Daemon) cleanup() {
+// Retorna true si exp.Cleanup() fue invocado (independientemente de si tuvo
+// error interno), false si no se pudo resolver la configuración y no se hizo nada.
+func (d *Daemon) cleanup() bool {
 	sel, err := obsidian.LoadSelection(d.cfg.SelectionPath)
 	if err != nil || !sel.HasConfig() {
-		return
+		return false
 	}
 	exp := obsidian.NewExporter(sel.Config.VaultPath, d.cfg.Logf)
 	if err := exp.Cleanup(); err != nil {
 		d.cfg.Logf("WARN cleanup: %v", err)
 	}
+	return true
 }
 
 // vaultHasContent devuelve true si el directorio _engram/ del vault ya existe
