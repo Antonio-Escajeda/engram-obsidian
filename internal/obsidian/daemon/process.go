@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// currentUID almacena el UID del proceso actual para evitar llamadas repetidas.
+var currentUID = os.Getuid()
+
 // ProcessConfig contiene la configuración para detección de procesos.
 type ProcessConfig struct {
 	TasklistPath string // path a tasklist.exe, default: /mnt/c/Windows/system32/tasklist.exe
@@ -33,11 +36,11 @@ func ObsidianRunning(cfg ProcessConfig) (bool, error) {
 	return strings.Contains(string(out), "Obsidian.exe"), nil
 }
 
-// RootSessionActive devuelve true si hay una sesión root interactiva en un pts device.
-// Lee /proc directamente sin subprocesos.
+// RootSessionActive devuelve true si hay una sesión interactiva del usuario actual
+// en un pts device. Lee /proc directamente sin subprocesos.
 //
-// Criterios para considerar "sesión root interactiva":
-//   - UID real == 0
+// Criterios para considerar "sesión interactiva activa":
+//   - UID real == UID del proceso actual (os.Getuid())
 //   - El proceso es un shell conocido (bash, zsh, sh, fish, dash)
 //   - No es un shell ejecutando un script (argv[1] es un path o flag -c/-s)
 //   - Está asociado a un pts device (major 136) con tpgid > 0
@@ -61,13 +64,13 @@ func RootSessionActive() bool {
 			continue
 		}
 
-		// Verificar UID real == 0 (campo Uid: en /proc/PID/status)
+		// Verificar UID real == UID del proceso actual (campo Uid: en /proc/PID/status)
 		status, err := os.ReadFile("/proc/" + pid + "/status")
 		if err != nil {
 			continue
 		}
 		uid := extractUID(string(status))
-		if uid != 0 {
+		if uid != currentUID {
 			continue
 		}
 
