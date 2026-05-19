@@ -22,7 +22,7 @@ if [[ -f "./cmd/engram-obsidian/main.go" ]]; then
     go build -o "$BINARY" ./cmd/engram-obsidian/
 else
     echo "   Modo remoto: go install"
-    GOBIN="$HOME/.local/bin" go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@latest
+    GOBIN="$HOME/.local/bin" go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@main
 fi
 echo "   Binario instalado en $BINARY"
 
@@ -47,11 +47,29 @@ WantedBy=default.target
 EOF
 echo "   Service file escrito en $SERVICE_FILE"
 
-# 5. Reload del daemon
+# 5. Migrar db_path a notación ~/... si tiene ruta absoluta del home
+SELECTION_JSON="$HOME/.engram/obsidian-selection.json"
+if [[ -f "$SELECTION_JSON" ]]; then
+    OLD_DB=$(python3 -c "import json,sys; d=json.load(open('$SELECTION_JSON')); print(d.get('config',{}).get('db_path',''))" 2>/dev/null || true)
+    if [[ "$OLD_DB" == "$HOME/"* ]]; then
+        NEW_DB="~/${OLD_DB#$HOME/}"
+        echo "-> Migrando db_path a notación portable..."
+        echo "   $OLD_DB → $NEW_DB"
+        python3 -c "
+import json, sys
+with open('$SELECTION_JSON') as f: d = json.load(f)
+d.setdefault('config', {})['db_path'] = '$NEW_DB'
+with open('$SELECTION_JSON', 'w') as f: json.dump(d, f, indent=2, ensure_ascii=False)
+print('   Migración completada.')
+" 2>/dev/null || echo "   WARN: no se pudo migrar el JSON automáticamente"
+    fi
+fi
+
+# 6. Reload del daemon
 echo "-> Recargando systemd daemon..."
 systemctl --user daemon-reload
 
-# 6. Habilitar/reiniciar segun estado actual
+# 7. Habilitar/reiniciar segun estado actual
 if systemctl --user is-active --quiet engram-obsidian; then
     echo "-> Servicio activo — reiniciando..."
     systemctl --user restart engram-obsidian
@@ -61,12 +79,12 @@ else
     systemctl --user start engram-obsidian
 fi
 
-# 7. Estado final
+# 8. Estado final
 echo ""
 echo "-> Estado del servicio:"
 systemctl --user status engram-obsidian --no-pager
 
-# 8. Aviso de primera instalacion
+# 9. Aviso de primera instalacion
 echo ""
 if [[ "$FIRST_INSTALL" == true ]]; then
     echo "Primera instalacion detectada."
