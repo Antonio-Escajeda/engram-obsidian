@@ -72,8 +72,12 @@ func (d *Daemon) RunOnce() error {
 
 	var observations []store.Observation
 	if dbPath != "" {
-		if reader, err := store.Open(dbPath); err == nil {
-			if data, err := reader.Export(); err == nil {
+		if reader, err := store.Open(dbPath); err != nil {
+			d.cfg.Logf("WARN --select: open db %q: %v — TUI will show empty list", dbPath, err)
+		} else {
+			if data, err := reader.Export(); err != nil {
+				d.cfg.Logf("WARN --select: export db: %v — TUI will show empty list", err)
+			} else {
 				observations = data.Observations
 			}
 			reader.Close()
@@ -247,8 +251,12 @@ func (d *Daemon) runCycle() (bool, error) {
 
 	var observations []store.Observation
 	if dbPath != "" {
-		if reader, err := store.Open(dbPath); err == nil {
-			if data, err := reader.Export(); err == nil {
+		if reader, err := store.Open(dbPath); err != nil {
+			d.cfg.Logf("WARN runCycle: open db %q: %v — TUI will show empty list", dbPath, err)
+		} else {
+			if data, err := reader.Export(); err != nil {
+				d.cfg.Logf("WARN runCycle: export db: %v — TUI will show empty list", err)
+			} else {
 				observations = data.Observations
 			}
 			reader.Close()
