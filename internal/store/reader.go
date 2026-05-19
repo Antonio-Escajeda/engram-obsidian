@@ -16,15 +16,24 @@ type Reader struct {
 	db *sql.DB
 }
 
-// Open abre la DB en modo read-only con WAL y timeout de 5s.
+// Open abre la DB compatible con WAL. Usa PRAGMA query_only para prevenir
+// escrituras accidentales en lugar de mode=ro, que falla con WAL (SQLITE_CANTOPEN).
 func Open(dbPath string) (*Reader, error) {
 	if strings.HasPrefix(dbPath, "~/") {
 		home, _ := os.UserHomeDir()
 		dbPath = filepath.Join(home, dbPath[2:])
 	}
-	dsn := fmt.Sprintf("file:%s?mode=ro&_timeout=5000", dbPath)
+	dsn := fmt.Sprintf("file:%s", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA query_only = 1"); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 	db.SetMaxOpenConns(1)
