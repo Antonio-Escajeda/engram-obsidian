@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -63,7 +65,7 @@ func (d *Daemon) RunOnce() error {
 		return fmt.Errorf("select cycle: load selection: %w", err)
 	}
 
-	dbPath := sel.Config.DBPath
+	dbPath := expandHomePath(sel.Config.DBPath)
 	if dbPath == "" {
 		dbPath = defaultDBPath()
 	}
@@ -238,7 +240,7 @@ func (d *Daemon) runCycle() (bool, error) {
 	}
 
 	// Necesitamos observaciones para la TUI — abrir DB
-	dbPath := sel.Config.DBPath
+	dbPath := expandHomePath(sel.Config.DBPath)
 	if dbPath == "" {
 		dbPath = defaultDBPath()
 	}
@@ -294,7 +296,8 @@ func (d *Daemon) doSync(sel *obsidian.Selection) (bool, error) {
 		return false, fmt.Errorf("selection has no config (vault/db path missing)")
 	}
 
-	reader, err := store.Open(sel.Config.DBPath)
+	dbPath := expandHomePath(sel.Config.DBPath)
+	reader, err := store.Open(dbPath)
 	if err != nil {
 		return false, fmt.Errorf("open db: %w", err)
 	}
@@ -345,4 +348,14 @@ func (d *Daemon) vaultHasContent() bool {
 func defaultDBPath() string {
 	home, _ := os.UserHomeDir()
 	return home + "/.engram/engram.db"
+}
+
+func expandHomePath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }

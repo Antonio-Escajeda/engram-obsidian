@@ -86,7 +86,7 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.Selection.Config.VaultPath = vault
-			m.Selection.Config.DBPath = db
+			m.Selection.Config.DBPath = contractHome(expandHome(db))
 			m.StatusMsg = ""
 			m.Screen = ScreenSelection
 			m.Flat = FlatNodes(m.Roots)
@@ -229,6 +229,17 @@ func expandHome(path string) string {
 		if err == nil {
 			return filepath.Join(home, path[2:])
 		}
+	}
+	return path
+}
+
+func contractHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if strings.HasPrefix(path, home+"/") {
+		return "~/" + path[len(home)+1:]
 	}
 	return path
 }
