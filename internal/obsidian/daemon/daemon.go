@@ -57,15 +57,56 @@ func New(cfg Config) *Daemon {
 // y nunca llama a cleanup, sin importar cómo termine.
 func (d *Daemon) RunOnce() error {
 	d.cfg.Logf("engram-obsidian --select: one-shot mode")
-	synced, err := d.runCycle()
+
+	sel, err := obsidian.LoadSelection(d.cfg.SelectionPath)
+	if err != nil {
+		return fmt.Errorf("select cycle: load selection: %w", err)
+	}
+
+	dbPath := sel.Config.DBPath
+	if dbPath == "" {
+		dbPath = defaultDBPath()
+	}
+
+	var observations []store.Observation
+	if dbPath != "" {
+		if reader, err := store.Open(dbPath); err == nil {
+			if data, err := reader.Export(); err == nil {
+				observations = data.Observations
+			}
+			reader.Close()
+		}
+	}
+
+	model := tui.New(sel, observations)
+	prog := tea.NewProgram(model, tea.WithAltScreen())
+	finalModel, err := prog.Run()
+	if err != nil {
+		return fmt.Errorf("select cycle: tui: %w", err)
+	}
+
+	m, ok := finalModel.(tui.Model)
+	if !ok || !m.Confirmed {
+		d.cfg.Logf("--select cancelled — exiting")
+		return nil
+	}
+
+	updatedSel := tui.ToSelection(m.Roots, m.Selection)
+	updatedSel.Config = m.Selection.Config
+	if err := updatedSel.Save(d.cfg.SelectionPath); err != nil {
+		d.cfg.Logf("WARN save selection: %v", err)
+	}
+
+	if !ShouldSync(d.cfg.Process) {
+		d.cfg.Logf("--select selection saved — conditions not active, skipping sync")
+		return nil
+	}
+
+	_, err = d.doSync(updatedSel)
 	if err != nil {
 		return fmt.Errorf("select cycle: %w", err)
 	}
-	if synced {
-		d.cfg.Logf("--select sync complete — exiting")
-	} else {
-		d.cfg.Logf("--select cancelled — exiting")
-	}
+	d.cfg.Logf("--select sync complete — exiting")
 	return nil
 }
 
@@ -122,7 +163,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			d.cfg.Logf("Context cancelled — shutting down")
-			if wasSynced {
+			if wasSynced || d.vaultHasContent() {
 				d.cleanup()
 			}
 			return ctx.Err()
@@ -155,7 +196,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 					}
 				}
 
-			} else if wasSynced && !conditionsMet {
+			} else if !conditionsMet && (wasSynced || d.vaultHasContent()) {
 				// Usar !conditionsMet en vez de ShouldCleanup() para evitar
 				// una segunda llamada a ObsidianRunning() en el mismo tick.
 				cleanupCountdown++
