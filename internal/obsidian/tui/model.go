@@ -58,6 +58,8 @@ func New(sel *obsidian.Selection, observations []store.Observation) Model {
 	}
 	if sel.Config.DBPath != "" {
 		dbInput.SetValue(sel.Config.DBPath)
+	} else {
+		dbInput.SetValue("~/.engram/engram.db")
 	}
 
 	// Determinar pantalla inicial
