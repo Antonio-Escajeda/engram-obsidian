@@ -88,7 +88,7 @@ if [[ -f "./cmd/engram-obsidian/main.go" ]]; then
     go build -o "$BINARY" ./cmd/engram-obsidian/
 else
     echo "   Modo remoto: go install"
-    GOBIN="$HOME/.local/bin" go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@main
+    GONOSUMCHECK=* GOPROXY=direct GOBIN="$HOME/.local/bin" go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-obsidian@main
 fi
 echo "   Binario instalado en $BINARY"
 
