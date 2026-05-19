@@ -15,7 +15,73 @@ fi
 echo "-> Verificando ~/.local/bin/ ..."
 mkdir -p "$HOME/.local/bin"
 
-# 2. Instalar binario
+# 2. Instalar Go si no existe o version < 1.24
+go_version_ok() {
+    local ver
+    ver=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
+    [[ -n "$ver" ]] && awk "BEGIN {exit !($ver >= 1.24)}"
+}
+
+if go_version_ok; then
+    echo "-> Go $(go version | grep -oP 'go\K[0-9.]+') ya instalado — OK"
+else
+    echo "-> Go 1.24+ no encontrado — instalando..."
+
+    # Detectar arquitectura
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  GO_ARCH="amd64" ;;
+        aarch64) GO_ARCH="arm64" ;;
+        *)       echo "Arquitectura $ARCH no soportada"; exit 1 ;;
+    esac
+
+    # Obtener versión latest de Go
+    GO_VERSION=$(curl -fsSL "https://golang.org/VERSION?m=text" | head -1)
+    GO_TARBALL="${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+    GO_URL="https://dl.google.com/go/${GO_TARBALL}"
+
+    echo "   Descargando ${GO_VERSION} para linux/${GO_ARCH}..."
+    curl -fsSL "$GO_URL" -o "/tmp/${GO_TARBALL}"
+
+    echo "   Instalando en $HOME/.local/go/ ..."
+    rm -rf "$HOME/.local/go"
+    mkdir -p "$HOME/.local"
+    tar -C "$HOME/.local" -xzf "/tmp/${GO_TARBALL}"
+    rm "/tmp/${GO_TARBALL}"
+
+    # Agregar al PATH de esta ejecucion
+    export PATH="$HOME/.local/go/bin:$PATH"
+
+    # Agregar al rc del shell del usuario
+    GO_PATH_LINE='export PATH="$HOME/.local/go/bin:$PATH"'
+    if [[ "$SHELL" == */zsh ]]; then
+        RC_FILE="$HOME/.zshrc"
+    elif [[ "$SHELL" == */bash ]]; then
+        RC_FILE="$HOME/.bashrc"
+    else
+        RC_FILE="$HOME/.profile"
+    fi
+
+    # Solo agregar si no esta ya
+    if ! grep -qF "$HOME/.local/go/bin" "$RC_FILE" 2>/dev/null; then
+        echo "$GO_PATH_LINE" >> "$RC_FILE"
+        echo "   PATH agregado a $RC_FILE"
+    fi
+
+    GO_INSTALLED=true
+    echo "   Go $(go version | grep -oP 'go\K[0-9.]+') instalado correctamente"
+fi
+
+# 3. Instalar engram si no existe
+if command -v engram &>/dev/null; then
+    echo "-> engram ya instalado — OK"
+else
+    echo "-> engram no encontrado — instalando..."
+    GOBIN="$HOME/.local/bin" go install github.com/Gentleman-Programming/engram/cmd/engram@latest
+    echo "   engram instalado en $HOME/.local/bin/engram"
+fi
+
+# 4. Instalar binario
 echo "-> Instalando binario..."
 if [[ -f "./cmd/engram-obsidian/main.go" ]]; then
     echo "   Modo repo local: go build"
@@ -26,11 +92,11 @@ else
 fi
 echo "   Binario instalado en $BINARY"
 
-# 3. Crear ~/.config/systemd/user/ si no existe
+# 5. Crear ~/.config/systemd/user/ si no existe
 echo "-> Verificando directorio systemd..."
 mkdir -p "$SERVICE_DIR"
 
-# 4. Escribir service file
+# 6. Escribir service file
 echo "-> Escribiendo service file..."
 cat > "$SERVICE_FILE" << 'EOF'
 [Unit]
@@ -47,7 +113,7 @@ WantedBy=default.target
 EOF
 echo "   Service file escrito en $SERVICE_FILE"
 
-# 5. Migrar db_path a notación ~/... si tiene ruta absoluta del home
+# 7. Migrar db_path a notación ~/... si tiene ruta absoluta del home
 SELECTION_JSON="$HOME/.engram/obsidian-selection.json"
 if [[ -f "$SELECTION_JSON" ]]; then
     OLD_DB=$(python3 -c "import json,sys; d=json.load(open('$SELECTION_JSON')); print(d.get('config',{}).get('db_path',''))" 2>/dev/null || true)
@@ -65,11 +131,11 @@ print('   Migración completada.')
     fi
 fi
 
-# 6. Reload del daemon
+# 8. Reload del daemon
 echo "-> Recargando systemd daemon..."
 systemctl --user daemon-reload
 
-# 7. Habilitar/reiniciar segun estado actual
+# 9. Habilitar/reiniciar segun estado actual
 if systemctl --user is-active --quiet engram-obsidian; then
     echo "-> Servicio activo — reiniciando..."
     systemctl --user restart engram-obsidian
@@ -79,16 +145,22 @@ else
     systemctl --user start engram-obsidian
 fi
 
-# 8. Estado final
+# 10. Estado final
 echo ""
 echo "-> Estado del servicio:"
 systemctl --user status engram-obsidian --no-pager
 
-# 9. Aviso de primera instalacion
+# 11. Aviso de primera instalacion
 echo ""
 if [[ "$FIRST_INSTALL" == true ]]; then
     echo "Primera instalacion detectada."
     echo "Corré 'engram-obsidian --select' para configurar el vault y la seleccion de proyectos."
 else
     echo "Actualizacion completada."
+fi
+
+if [[ "${GO_INSTALLED:-false}" == true ]]; then
+    echo ""
+    echo "IMPORTANTE: Go fue instalado. Para usarlo en esta terminal corré:"
+    echo "  source $RC_FILE"
 fi
