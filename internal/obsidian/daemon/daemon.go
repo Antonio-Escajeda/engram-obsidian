@@ -72,8 +72,12 @@ func (d *Daemon) RunOnce() error {
 
 	var observations []store.Observation
 	if dbPath != "" {
-		if reader, err := store.Open(dbPath); err == nil {
-			if data, err := reader.Export(); err == nil {
+		if reader, err := store.Open(dbPath); err != nil {
+			d.cfg.Logf("WARN open db: %v", err)
+		} else {
+			if data, err := reader.Export(); err != nil {
+				d.cfg.Logf("WARN export db: %v", err)
+			} else {
 				observations = data.Observations
 			}
 			reader.Close()
@@ -251,8 +255,12 @@ func (d *Daemon) runCycle() (bool, error) {
 
 	var observations []store.Observation
 	if dbPath != "" {
-		if reader, err := store.Open(dbPath); err == nil {
-			if data, err := reader.Export(); err == nil {
+		if reader, err := store.Open(dbPath); err != nil {
+			d.cfg.Logf("WARN open db: %v", err)
+		} else {
+			if data, err := reader.Export(); err != nil {
+				d.cfg.Logf("WARN export db: %v", err)
+			} else {
 				observations = data.Observations
 			}
 			reader.Close()
