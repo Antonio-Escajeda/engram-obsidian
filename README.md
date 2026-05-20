@@ -98,6 +98,7 @@ engram-obsidian --select
 En la pantalla de configuración:
 - **Vault path**: se pre-rellena automáticamente con la carpeta `Documents` del usuario Windows actual (detectado via `wslvar USERPROFILE`). Podés confirmarlo o cambiarlo; también podés presionar `b` para abrir el selector de carpetas de Windows
 - **DB path**: path a `~/.engram/engram.db`
+- **Graph mode**: `● Star` / `○ Full Mesh` — navegá con `← →` o `Space` para cambiar
 - `Tab` para navegar entre campos · `Enter` para continuar a la selección
 
 > **Nota:** la detección automática del vault path solo ocurre en el primer uso. Si ya existe config guardada en `~/.engram/obsidian-selection.json`, se respeta sin sobreescribir.
@@ -107,6 +108,17 @@ En la pantalla de configuración:
 La TUI muestra un árbol `Proyecto → Mes → Nota`. Usá `Space` para activar/desactivar, `s` para confirmar y sincronizar.
 
 La selección se guarda en `~/.engram/obsidian-selection.json` y el daemon la usa en cada ciclo.
+
+### Graph Mode
+
+Controla cómo se generan los links entre notas para el Obsidian graph view.
+
+| Modo | Comportamiento |
+|---|---|
+| **Star** (default) | Cada tipo tiene un archivo hub (`📋 bugfix.md`, `📋 architecture.md`, etc.). Todas las notas del mismo tipo apuntan al hub → topología estrella por color. |
+| **Full Mesh** | Además de los hubs, cada nota linkea directamente a todas las demás del mismo tipo en el mismo proyecto → clique completo por color. |
+
+Se configura en la pantalla de configuración (`--select`) con el campo **Graph mode**.
 
 ## Estructura del vault
 

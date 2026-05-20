@@ -36,7 +36,9 @@ func ObservationPath(engramRoot string, obs store.Observation) string {
 }
 
 // ObservationToMarkdown convierte una observation a markdown con frontmatter completo.
-func ObservationToMarkdown(obs store.Observation, relPath string, engramRoot string) string {
+// peers es la lista de observations del mismo proyecto+tipo para generar cross-links
+// en modo full_mesh. Pasar nil o vacío para modo star (sin sección Relacionadas).
+func ObservationToMarkdown(obs store.Observation, relPath string, engramRoot string, peers []store.Observation) string {
 	project := sanitize(obs.ProjectName())
 	obsType := sanitize(obs.Type)
 	topicKey := obs.TopicKeyStr()
@@ -89,17 +91,33 @@ func ObservationToMarkdown(obs store.Observation, relPath string, engramRoot str
 	fmt.Fprintf(&sb, "aliases:\n  - \"%s\"\n", safeTitle)
 	fmt.Fprintf(&sb, "---\n\n")
 
-	// Wikilink solo al padre inmediato (mes → año → proyecto lo maneja la jerarquía de índices)
+	// Breadcrumb: wikilink al padre inmediato + wikilink al hub de tipo
+	hubPath := filepath.Join(engramRoot, project, "📋 "+obsType)
 	if monthDir != "sin-fecha" {
-		fmt.Fprintf(&sb, "> [[%s|%s]]  \n\n", filepath.Join(engramRoot, project, year, monthDir, monthDir), monthDir)
+		fmt.Fprintf(&sb, "> [[%s|%s]] · [[%s|📋 %s]]  \n\n",
+			filepath.Join(engramRoot, project, year, monthDir, monthDir), monthDir,
+			hubPath, obsType)
 	} else if year != "sin-fecha" {
-		fmt.Fprintf(&sb, "> [[%s|%s]]  \n\n", filepath.Join(engramRoot, project, year, year), year)
+		fmt.Fprintf(&sb, "> [[%s|%s]] · [[%s|📋 %s]]  \n\n",
+			filepath.Join(engramRoot, project, year, year), year,
+			hubPath, obsType)
 	} else {
-		fmt.Fprintf(&sb, "> [[%s|%s]]  \n\n", filepath.Join(engramRoot, project, "📁 "+project), project)
+		fmt.Fprintf(&sb, "> [[%s|%s]] · [[%s|📋 %s]]  \n\n",
+			filepath.Join(engramRoot, project, "📁 "+project), project,
+			hubPath, obsType)
 	}
 
 	// Contenido
 	fmt.Fprintf(&sb, "# %s\n\n%s\n", title, obs.Content)
+
+	// Sección Relacionadas — solo en modo full_mesh (cuando peers no está vacío).
+	if len(peers) > 0 {
+		fmt.Fprintf(&sb, "\n---\n\n## Relacionadas (%s)\n\n", obsType)
+		for _, peer := range peers {
+			peerPath := ObservationPath(engramRoot, peer)
+			fmt.Fprintf(&sb, "- [[%s|%s]]\n", peerPath, peer.Title)
+		}
+	}
 
 	return sb.String()
 }

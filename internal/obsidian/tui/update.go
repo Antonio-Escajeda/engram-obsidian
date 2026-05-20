@@ -45,11 +45,11 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "tab", "down":
-		m.ConfigFocus = (m.ConfigFocus + 1) % 3
+		m.ConfigFocus = (m.ConfigFocus + 1) % 4
 		return m.updateConfigFocus()
 
 	case "shift+tab", "up":
-		m.ConfigFocus = (m.ConfigFocus + 2) % 3
+		m.ConfigFocus = (m.ConfigFocus + 3) % 4
 		return m.updateConfigFocus()
 
 	case "b":
@@ -72,8 +72,39 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+	case "left", "h":
+		if m.ConfigFocus == 2 {
+			m.GraphMode = "star"
+			return m, nil
+		}
+
+	case "right", "l":
+		if m.ConfigFocus == 2 {
+			m.GraphMode = "full_mesh"
+			return m, nil
+		}
+
+	case " ":
+		if m.ConfigFocus == 2 {
+			if m.GraphMode == "full_mesh" {
+				m.GraphMode = "star"
+			} else {
+				m.GraphMode = "full_mesh"
+			}
+			return m, nil
+		}
+
 	case "enter":
 		if m.ConfigFocus == 2 {
+			// Toggle graph mode con enter cuando está enfocado
+			if m.GraphMode == "full_mesh" {
+				m.GraphMode = "star"
+			} else {
+				m.GraphMode = "full_mesh"
+			}
+			return m, nil
+		}
+		if m.ConfigFocus == 3 {
 			// Confirmar config
 			vault := expandHome(m.VaultInput.Value())
 			db := expandHome(m.DBInput.Value())
@@ -87,6 +118,7 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 			}
 			m.Selection.Config.VaultPath = vault
 			m.Selection.Config.DBPath = contractHome(expandHome(db))
+			m.Selection.Config.GraphMode = m.GraphMode
 			m.StatusMsg = ""
 			m.Screen = ScreenSelection
 			m.Flat = FlatNodes(m.Roots)
@@ -94,7 +126,7 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Enter en un input: avanzar foco
-		m.ConfigFocus = (m.ConfigFocus + 1) % 3
+		m.ConfigFocus = (m.ConfigFocus + 1) % 4
 		return m.updateConfigFocus()
 	}
 
@@ -110,7 +142,7 @@ func (m Model) updateConfigFocus() (tea.Model, tea.Cmd) {
 	case 1:
 		m.VaultInput.Blur()
 		m.DBInput.Focus()
-	case 2:
+	case 2, 3:
 		m.VaultInput.Blur()
 		m.DBInput.Blur()
 	}

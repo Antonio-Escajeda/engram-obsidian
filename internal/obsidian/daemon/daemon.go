@@ -320,7 +320,7 @@ func (d *Daemon) doSync(sel *obsidian.Selection) (bool, error) {
 		return false, fmt.Errorf("export db: %w", err)
 	}
 
-	exporter := obsidian.NewExporter(sel.Config.VaultPath, d.cfg.Logf)
+	exporter := obsidian.NewExporter(sel.Config.VaultPath, sel.Config.GraphModeOrDefault(), d.cfg.Logf)
 	result, err := exporter.Export(data, sel.Filter)
 	if err != nil {
 		return false, fmt.Errorf("export vault: %w", err)
@@ -340,7 +340,7 @@ func (d *Daemon) cleanup() bool {
 	if err != nil || !sel.HasConfig() {
 		return false
 	}
-	exp := obsidian.NewExporter(sel.Config.VaultPath, d.cfg.Logf)
+	exp := obsidian.NewExporter(sel.Config.VaultPath, sel.Config.GraphModeOrDefault(), d.cfg.Logf)
 	if err := exp.Cleanup(); err != nil {
 		d.cfg.Logf("WARN cleanup: %v", err)
 	}
@@ -355,7 +355,7 @@ func (d *Daemon) vaultHasContent() bool {
 	if err != nil || !sel.HasConfig() {
 		return false
 	}
-	exp := obsidian.NewExporter(sel.Config.VaultPath, d.cfg.Logf)
+	exp := obsidian.NewExporter(sel.Config.VaultPath, sel.Config.GraphModeOrDefault(), d.cfg.Logf)
 	info, err := os.Stat(exp.EngramRoot())
 	return err == nil && info.IsDir()
 }

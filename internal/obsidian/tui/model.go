@@ -24,7 +24,8 @@ type Model struct {
 	// Config screen
 	VaultInput  textinput.Model
 	DBInput     textinput.Model
-	ConfigFocus int // 0 = vault, 1 = db, 2 = confirmar
+	GraphMode   string // "star" | "full_mesh"
+	ConfigFocus int    // 0 = vault, 1 = db, 2 = graphmode, 3 = confirmar
 
 	// Selection screen
 	Roots  []*TreeNode
@@ -62,6 +63,8 @@ func New(sel *obsidian.Selection, observations []store.Observation) Model {
 		dbInput.SetValue("~/.engram/engram.db")
 	}
 
+	graphMode := sel.Config.GraphModeOrDefault()
+
 	// Determinar pantalla inicial
 	screen := ScreenConfig
 	if sel.HasConfig() {
@@ -80,6 +83,7 @@ func New(sel *obsidian.Selection, observations []store.Observation) Model {
 		Screen:       screen,
 		VaultInput:   vaultInput,
 		DBInput:      dbInput,
+		GraphMode:    graphMode,
 		Roots:        roots,
 		Flat:         flat,
 		Selection:    sel,

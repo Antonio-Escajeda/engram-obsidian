@@ -29,10 +29,19 @@ type ProjectSelection struct {
 	Months map[string]MonthSelection `json:"months,omitempty"` // clave: "YYYY-MM"
 }
 
-// Config almacena la configuración del daemon (vault path, db path).
+// Config almacena la configuración del daemon (vault path, db path, graph mode).
 type Config struct {
 	VaultPath string `json:"vault_path"`
 	DBPath    string `json:"db_path"`
+	GraphMode string `json:"graph_mode"` // "star" (default) | "full_mesh"
+}
+
+// GraphModeOrDefault retorna el graph mode configurado, o "star" si está vacío.
+func (c Config) GraphModeOrDefault() string {
+	if c.GraphMode == "" {
+		return "star"
+	}
+	return c.GraphMode
 }
 
 // Selection es la selección persistida completa.

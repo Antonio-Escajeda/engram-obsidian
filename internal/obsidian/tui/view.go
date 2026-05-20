@@ -57,9 +57,24 @@ func (m Model) viewConfig() string {
 	}
 	sb.WriteString(label + m.DBInput.View() + "\n\n")
 
+	// Graph mode selector
+	starRadio := "○ Star"
+	meshRadio := "○ Full Mesh"
+	if m.GraphMode == "full_mesh" {
+		meshRadio = "● Full Mesh"
+	} else {
+		starRadio = "● Star"
+	}
+	graphLine := fmt.Sprintf("  Graph mode:  %s   %s", starRadio, meshRadio)
+	if m.ConfigFocus == 2 {
+		graphLine = styleFocused.Render("▶ Graph mode: ") + fmt.Sprintf(" %s   %s", starRadio, meshRadio)
+		graphLine += "   " + styleHint.Render("(← → para cambiar)")
+	}
+	sb.WriteString(graphLine + "\n\n")
+
 	// Botón confirmar
 	btn := "  [ Continuar ]"
-	if m.ConfigFocus == 2 {
+	if m.ConfigFocus == 3 {
 		btn = styleFocused.Render("▶ [ Continuar ]")
 	}
 	sb.WriteString(btn + "\n\n")

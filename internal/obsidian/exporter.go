@@ -50,15 +50,19 @@ type ObsRef struct {
 // Exporter escribe observaciones filtradas al vault de Obsidian.
 type Exporter struct {
 	vaultPath string
+	graphMode string
 	logf      func(string, ...any)
 }
 
 // NewExporter crea un Exporter.
-func NewExporter(vaultPath string, logf func(string, ...any)) *Exporter {
+func NewExporter(vaultPath string, graphMode string, logf func(string, ...any)) *Exporter {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Exporter{vaultPath: vaultPath, logf: logf}
+	if graphMode == "" {
+		graphMode = "star"
+	}
+	return &Exporter{vaultPath: vaultPath, graphMode: graphMode, logf: logf}
 }
 
 // EngramRoot retorna el path absoluto de la carpeta _engram/ dentro del vault.
@@ -96,6 +100,27 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 		e.logf("WARN graph config: %v", err)
 	}
 
+	// Para full_mesh: construir índice por proyecto+tipo para obtener peers rápido.
+	// typeIndex[project][type] → lista de observations activas y filtradas.
+	var typeIndex map[string]map[string][]store.Observation
+	if e.graphMode == "full_mesh" {
+		typeIndex = map[string]map[string][]store.Observation{}
+		for _, obs := range data.Observations {
+			if obs.IsDeleted() {
+				continue
+			}
+			if filter != nil && !filter(obs) {
+				continue
+			}
+			proj := obs.ProjectName()
+			obsType := obs.Type
+			if typeIndex[proj] == nil {
+				typeIndex[proj] = map[string][]store.Observation{}
+			}
+			typeIndex[proj][obsType] = append(typeIndex[proj][obsType], obs)
+		}
+	}
+
 	// Procesar observations
 	written := map[int64]ObsRef{}
 
@@ -128,7 +153,17 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 			continue
 		}
 
-		md := ObservationToMarkdown(obs, relPath, engramRoot)
+		// Obtener peers para full_mesh: mismas tipo+proyecto, excluyendo la nota actual.
+		var peers []store.Observation
+		if e.graphMode == "full_mesh" {
+			for _, candidate := range typeIndex[obs.ProjectName()][obs.Type] {
+				if candidate.ID != obs.ID {
+					peers = append(peers, candidate)
+				}
+			}
+		}
+
+		md := ObservationToMarkdown(obs, relPath, engramRoot, peers)
 		if err := os.WriteFile(absPath, []byte(md), 0644); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("write obs %d: %w", obs.ID, err))
 			continue
@@ -241,6 +276,8 @@ func (e *Exporter) writeIndexes(obs []store.Observation, filter func(store.Obser
 	type projData struct {
 		// years → months → observations
 		years map[string]map[string][]store.Observation
+		// types → observations (para hubs por tipo)
+		types map[string][]store.Observation
 	}
 
 	projects := map[string]*projData{}
@@ -261,13 +298,19 @@ func (e *Exporter) writeIndexes(obs []store.Observation, filter func(store.Obser
 
 		pd, ok := projects[proj]
 		if !ok {
-			pd = &projData{years: map[string]map[string][]store.Observation{}}
+			pd = &projData{
+				years: map[string]map[string][]store.Observation{},
+				types: map[string][]store.Observation{},
+			}
 			projects[proj] = pd
 		}
 		if pd.years[year] == nil {
 			pd.years[year] = map[string][]store.Observation{}
 		}
 		pd.years[year][month] = append(pd.years[year][month], o)
+
+		obsType := sanitize(o.Type)
+		pd.types[obsType] = append(pd.types[obsType], o)
 	}
 
 	// ── Root _index.md ─────────────────────────────────────────────────────────
@@ -352,6 +395,21 @@ func (e *Exporter) writeIndexes(obs []store.Observation, filter func(store.Obser
 				monthFile := filepath.Join(monthDir, month+".md")
 				_ = os.WriteFile(monthFile, []byte(monthSb.String()), 0644)
 			}
+		}
+
+		// ── Hub files por tipo: _engram/{project}/📋 {type}.md ───────────────────
+		for obsType, typeObs := range pd.types {
+			var hubSb strings.Builder
+			fmt.Fprintf(&hubSb, "---\ntags: [engram-hub, %s]\n---\n\n# %s / %s\n\n[[%s|← %s]]\n\n",
+				obsType, proj, obsType,
+				filepath.Join(engramRoot, proj, "📁 "+proj), proj)
+			fmt.Fprintf(&hubSb, "## Memorias (%d)\n\n", len(typeObs))
+			for _, o := range typeObs {
+				obsRelPath := ObservationPath(engramRoot, o)
+				fmt.Fprintf(&hubSb, "- [[%s|%s]]\n", obsRelPath, o.Title)
+			}
+			hubFile := filepath.Join(projDir, "📋 "+obsType+".md")
+			_ = os.WriteFile(hubFile, []byte(hubSb.String()), 0644)
 		}
 	}
 }
