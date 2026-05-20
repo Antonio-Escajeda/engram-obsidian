@@ -27,6 +27,79 @@ func removeEmptyDirs(root string) {
 	}
 }
 
+// removeStaleMonthDirs elimina directorios de mes (y año) dentro de _engram/ que ya no
+// tienen observaciones activas según activeMonths.
+// activeMonths usa keys del estilo "proj/2026/04-abril".
+func (e *Exporter) removeStaleMonthDirs(engramAbs string, activeMonths map[string]bool) {
+	projEntries, err := os.ReadDir(engramAbs)
+	if err != nil {
+		return
+	}
+	for _, projEntry := range projEntries {
+		if !projEntry.IsDir() {
+			continue
+		}
+		projDir := filepath.Join(engramAbs, projEntry.Name())
+		yearEntries, err := os.ReadDir(projDir)
+		if err != nil {
+			continue
+		}
+		for _, yearEntry := range yearEntries {
+			if !yearEntry.IsDir() {
+				continue
+			}
+			yearDir := filepath.Join(projDir, yearEntry.Name())
+			monthEntries, err := os.ReadDir(yearDir)
+			if err != nil {
+				continue
+			}
+			for _, monthEntry := range monthEntries {
+				if !monthEntry.IsDir() {
+					continue
+				}
+				key := filepath.Join(projEntry.Name(), yearEntry.Name(), monthEntry.Name())
+				if !activeMonths[key] {
+					staleDir := filepath.Join(yearDir, monthEntry.Name())
+					if err := os.RemoveAll(staleDir); err != nil {
+						e.logf("WARN delete stale month dir %s: %v", staleDir, err)
+					} else {
+						e.logf("Removed stale month dir: %s", key)
+					}
+				}
+			}
+			// Si el año quedó vacío de meses (solo puede tener el año.md), borrarlo.
+			// removeEmptyDirs se encarga luego, pero borramos el year.md explícitamente
+			// para que el directorio quede vacío y removeEmptyDirs lo elimine.
+			remaining, _ := os.ReadDir(yearDir)
+			allIndexFiles := true
+			for _, r := range remaining {
+				if r.IsDir() {
+					allIndexFiles = false
+					break
+				}
+			}
+			if allIndexFiles && len(remaining) > 0 {
+				// Solo quedan archivos (ej: {year}.md) — verificar si hay meses activos en este año.
+				hasActiveMonth := false
+				prefix := filepath.Join(projEntry.Name(), yearEntry.Name()) + string(filepath.Separator)
+				for k := range activeMonths {
+					if strings.HasPrefix(k, prefix) {
+						hasActiveMonth = true
+						break
+					}
+				}
+				if !hasActiveMonth {
+					if err := os.RemoveAll(yearDir); err != nil {
+						e.logf("WARN delete stale year dir %s: %v", yearDir, err)
+					} else {
+						e.logf("Removed stale year dir: %s/%s", projEntry.Name(), yearEntry.Name())
+					}
+				}
+			}
+		}
+	}
+}
+
 // defaultStateFilePath retorna el path del state file fuera del vault,
 // en ~/.engram/obsidian-sync-state.json, para que Cleanup() no lo borre.
 func defaultStateFilePath() string {
@@ -123,6 +196,7 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 
 	// Procesar observations
 	written := map[int64]ObsRef{}
+	activeMonths := map[string]bool{}
 
 	for _, obs := range data.Observations {
 		if obs.IsDeleted() {
@@ -170,6 +244,17 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 		}
 
 		state.Files[obs.ID] = relPath
+
+		// Acumular mes activo para cleanup posterior de índices de mes/año huérfanos.
+		{
+			year := obs.CreatedYear()
+			if year == "" {
+				year = "sin-fecha"
+			}
+			month := monthDirForObs(obs)
+			activeMonths[filepath.Join(sanitize(obs.ProjectName()), year, month)] = true
+		}
+
 		written[obs.ID] = ObsRef{
 			Slug:      filepath.Base(relPath),
 			Title:     obs.Title,
@@ -203,6 +288,9 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 
 	// Generar índices solo para los proyectos activos.
 	e.writeIndexes(data.Observations, filter, engramRoot, engramAbs)
+
+	// Eliminar directorios de mes/año que ya no tienen observaciones activas.
+	e.removeStaleMonthDirs(engramAbs, activeMonths)
 
 	// Sweep de índices: eliminar subdirectorios de proyectos que ya no están activos.
 	// Los archivos de observaciones individuales ya fueron borrados arriba (sweep de state.Files).
