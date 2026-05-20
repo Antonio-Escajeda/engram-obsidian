@@ -1,6 +1,7 @@
 package obsidian
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,6 +148,118 @@ func (e *Exporter) EngramRoot() string {
 // Se guarda en ~/.engram/ para que Cleanup() (que borra _engram/) no lo destruya.
 func (e *Exporter) stateFilePath() string {
 	return defaultStateFilePath()
+}
+
+// workspaceStateFilePath retorna el path donde se guarda el lastOpenFiles del vault.
+func (e *Exporter) workspaceStateFilePath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".engram", "obsidian-workspace-state.json")
+}
+
+// saveWorkspaceState lee lastOpenFiles de .obsidian/workspace.json y, si tiene
+// entradas, las persiste en ~/.engram/obsidian-workspace-state.json; luego limpia
+// el campo en el archivo para no revelar qué memorias estaba viendo el usuario.
+func (e *Exporter) saveWorkspaceState() error {
+	workspacePath := filepath.Join(e.vaultPath, ".obsidian", "workspace.json")
+	raw, err := os.ReadFile(workspacePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no hay workspace.json — no es error
+		}
+		return fmt.Errorf("read workspace.json: %w", err)
+	}
+
+	// Usar map[string]json.RawMessage para no perder campos desconocidos.
+	var ws map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &ws); err != nil {
+		return fmt.Errorf("parse workspace.json: %w", err)
+	}
+
+	rawFiles, ok := ws["lastOpenFiles"]
+	if !ok {
+		return nil // campo ausente — nada que hacer
+	}
+
+	var lastOpenFiles []string
+	if err := json.Unmarshal(rawFiles, &lastOpenFiles); err != nil {
+		return fmt.Errorf("parse lastOpenFiles: %w", err)
+	}
+
+	if len(lastOpenFiles) > 0 {
+		// Guardar el array en el state file.
+		stateData, err := json.Marshal(lastOpenFiles)
+		if err != nil {
+			return fmt.Errorf("marshal workspace state: %w", err)
+		}
+		if err := os.WriteFile(e.workspaceStateFilePath(), stateData, 0600); err != nil {
+			return fmt.Errorf("write workspace state: %w", err)
+		}
+	}
+
+	// Limpiar lastOpenFiles en el workspace.json.
+	ws["lastOpenFiles"] = json.RawMessage(`[]`)
+	out, err := json.MarshalIndent(ws, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal workspace.json: %w", err)
+	}
+	if err := os.WriteFile(workspacePath, out, 0644); err != nil {
+		return fmt.Errorf("write workspace.json: %w", err)
+	}
+
+	return nil
+}
+
+// restoreWorkspaceState lee ~/.engram/obsidian-workspace-state.json y, si existe,
+// restaura lastOpenFiles en .obsidian/workspace.json; luego borra el state file.
+func (e *Exporter) restoreWorkspaceState() error {
+	stateFile := e.workspaceStateFilePath()
+	stateData, err := os.ReadFile(stateFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no hay estado guardado — no es error
+		}
+		return fmt.Errorf("read workspace state: %w", err)
+	}
+
+	var lastOpenFiles []string
+	if err := json.Unmarshal(stateData, &lastOpenFiles); err != nil {
+		return fmt.Errorf("parse workspace state: %w", err)
+	}
+
+	workspacePath := filepath.Join(e.vaultPath, ".obsidian", "workspace.json")
+	raw, err := os.ReadFile(workspacePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No hay workspace.json — borrar el state file de todas formas y salir.
+			_ = os.Remove(stateFile)
+			return nil
+		}
+		return fmt.Errorf("read workspace.json: %w", err)
+	}
+
+	var ws map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &ws); err != nil {
+		return fmt.Errorf("parse workspace.json: %w", err)
+	}
+
+	restored, err := json.Marshal(lastOpenFiles)
+	if err != nil {
+		return fmt.Errorf("marshal lastOpenFiles: %w", err)
+	}
+	ws["lastOpenFiles"] = json.RawMessage(restored)
+
+	out, err := json.MarshalIndent(ws, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal workspace.json: %w", err)
+	}
+	if err := os.WriteFile(workspacePath, out, 0644); err != nil {
+		return fmt.Errorf("write workspace.json: %w", err)
+	}
+
+	// Consumir el state file.
+	_ = os.Remove(stateFile)
+
+	return nil
 }
 
 // Export sincroniza las observations filtradas al vault.
@@ -330,11 +443,21 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 		e.logf("WARN write state: %v", err)
 	}
 
+	// Restaurar lastOpenFiles en .obsidian/workspace.json si hay un estado guardado.
+	if err := e.restoreWorkspaceState(); err != nil {
+		e.logf("WARN restore workspace state: %v", err)
+	}
+
 	return result, nil
 }
 
 // Cleanup elimina _engram/ y graph.json del vault.
+// Antes de borrar, guarda lastOpenFiles de .obsidian/workspace.json para que
+// restoreWorkspaceState() pueda recuperarlos en el próximo Export().
 func (e *Exporter) Cleanup() error {
+	if err := e.saveWorkspaceState(); err != nil {
+		e.logf("WARN save workspace state: %v", err)
+	}
 	engramAbs := e.EngramRoot()
 	if err := os.RemoveAll(engramAbs); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove engram dir: %w", err)
