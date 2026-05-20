@@ -34,6 +34,7 @@ type Config struct {
 	VaultPath string `json:"vault_path"`
 	DBPath    string `json:"db_path"`
 	GraphMode string `json:"graph_mode"` // "star" (default) | "full_mesh"
+	EncryptDB bool   `json:"encrypt_db"` // default: false (opt-in)
 }
 
 // GraphModeOrDefault retorna el graph mode configurado, o "star" si está vacío.
@@ -42,6 +43,11 @@ func (c Config) GraphModeOrDefault() string {
 		return "star"
 	}
 	return c.GraphMode
+}
+
+// EncryptDBEnabled retorna el valor de EncryptDB (false si no configurado).
+func (c Config) EncryptDBEnabled() bool {
+	return c.EncryptDB
 }
 
 // Selection es la selección persistida completa.

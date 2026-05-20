@@ -72,9 +72,24 @@ func (m Model) viewConfig() string {
 	}
 	sb.WriteString(graphLine + "\n\n")
 
+	// Encrypt DB toggle
+	disabledRadio := "○ Disabled"
+	enabledRadio := "○ Enabled"
+	if m.EncryptDB {
+		enabledRadio = "● Enabled"
+	} else {
+		disabledRadio = "● Disabled"
+	}
+	encryptLine := fmt.Sprintf("  Encrypt DB:  %s  %s", disabledRadio, enabledRadio)
+	if m.ConfigFocus == 3 {
+		encryptLine = styleFocused.Render("▶ Encrypt DB: ") + fmt.Sprintf(" %s  %s", disabledRadio, enabledRadio)
+		encryptLine += "   " + styleHint.Render("(space para cambiar)")
+	}
+	sb.WriteString(encryptLine + "\n\n")
+
 	// Botón confirmar
 	btn := "  [ Continuar ]"
-	if m.ConfigFocus == 3 {
+	if m.ConfigFocus == 4 {
 		btn = styleFocused.Render("▶ [ Continuar ]")
 	}
 	sb.WriteString(btn + "\n\n")

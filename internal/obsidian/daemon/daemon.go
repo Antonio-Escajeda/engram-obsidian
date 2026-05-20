@@ -2,17 +2,21 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/Antonio-Escajeda/engram-obsidian/internal/crypto"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian/tui"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
+	_ "modernc.org/sqlite"
 )
 
 const cleanupConfirmPolls = 2
@@ -120,6 +124,32 @@ func (d *Daemon) RunOnce() error {
 func (d *Daemon) Run(ctx context.Context) error {
 	d.cfg.Logf("engram-obsidian daemon starting (poll: %s, sync interval: %s)", d.cfg.PollInterval, d.cfg.SyncInterval)
 
+	// T3.5 — flock para instancia única.
+	// Cargar selección aquí para obtener dbPath antes de cualquier otra operación.
+	startupSel, err := obsidian.LoadSelection(d.cfg.SelectionPath)
+	if err != nil {
+		return fmt.Errorf("run: load selection for lock: %w", err)
+	}
+	dbPath := expandHomePath(startupSel.Config.DBPath)
+	if dbPath == "" {
+		dbPath = defaultDBPath()
+	}
+	lockPath := filepath.Join(filepath.Dir(dbPath), "engram-obsidian.lock")
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("open lock file: %w", err)
+	}
+	defer lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return fmt.Errorf("another engram-obsidian instance is already running")
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) //nolint:errcheck
+
+	// T3.1 — resolveDBState al inicio, antes de cualquier ShouldSync o acceso a DB.
+	if err := d.resolveDBState(dbPath); err != nil {
+		d.cfg.Logf("WARN resolveDBState: %v", err)
+	}
+
 	// wasSynced refleja si este proceso creó contenido en el vault.
 	// Al arrancar, se inicializa en true si el vault ya tiene contenido
 	// (puede ocurrir si el daemon fue reiniciado con el vault aún poblado).
@@ -133,6 +163,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Bootstrap: evaluar condiciones y actuar en consecuencia.
 	conditionsMet := ShouldSync(d.cfg.Process)
+	if conditionsMet {
+		// T3.2 — decryptDB en el path de bootstrap cuando conditionsMet es true.
+		if startupSel.Config.EncryptDBEnabled() {
+			if err := d.decryptDB(dbPath); err != nil {
+				d.cfg.Logf("WARN decryptDB (bootstrap): %v — skipping startup sync", err)
+				conditionsMet = false // forzar standby; no sincronizar con DB cifrada
+			}
+		}
+	}
 	if conditionsMet {
 		if d.cfg.DaemonMode {
 			d.cfg.Logf("Conditions MET on startup — syncing (daemon mode)")
@@ -183,6 +222,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 			conditionsMet = ShouldSync(d.cfg.Process)
 
 			if !wasSynced && conditionsMet {
+				// T3.2 — decryptDB en el loop cuando conditionsMet pasa a true.
+				// Necesitamos el config actualizado — recargar selección para obtener EncryptDB.
+				tickSel, selErr := obsidian.LoadSelection(d.cfg.SelectionPath)
+				if selErr == nil && tickSel.Config.EncryptDBEnabled() {
+					tickDBPath := expandHomePath(tickSel.Config.DBPath)
+					if tickDBPath == "" {
+						tickDBPath = defaultDBPath()
+					}
+					if err := d.decryptDB(tickDBPath); err != nil {
+						d.cfg.Logf("WARN decryptDB (loop): %v — skipping sync", err)
+						continue
+					}
+				}
+
 				if d.cfg.DaemonMode {
 					d.cfg.Logf("Conditions MET — syncing (daemon mode)")
 					if err := d.syncOnly(); err != nil {
@@ -212,6 +265,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 				d.cfg.Logf("Conditions lost (%d/%d) — waiting to confirm cleanup", cleanupCountdown, cleanupConfirmPolls)
 				if cleanupCountdown >= cleanupConfirmPolls {
 					d.cfg.Logf("Cleaning up vault")
+					// T3.3 — encryptDB antes de cleanup cuando EncryptDB está habilitado.
+					cleanupSel, selErr := obsidian.LoadSelection(d.cfg.SelectionPath)
+					if selErr == nil && cleanupSel.Config.EncryptDBEnabled() {
+						cleanupDBPath := expandHomePath(cleanupSel.Config.DBPath)
+						if cleanupDBPath == "" {
+							cleanupDBPath = defaultDBPath()
+						}
+						if err := d.encryptDB(cleanupDBPath); err != nil {
+							d.cfg.Logf("WARN encryptDB: %v — retrying next tick", err)
+							continue // No resetear cleanupCountdown; reintentar en el próximo tick.
+						}
+					}
 					if d.cleanup() {
 						wasSynced = false
 						cleanupCountdown = 0
@@ -358,6 +423,146 @@ func (d *Daemon) vaultHasContent() bool {
 	exp := obsidian.NewExporter(sel.Config.VaultPath, sel.Config.GraphModeOrDefault(), d.cfg.Logf)
 	info, err := os.Stat(exp.EngramRoot())
 	return err == nil && info.IsDir()
+}
+
+// resolveDBState verifica el estado del DB en disco al inicio de Run().
+// Si ambos .db y .db.enc existen simultáneamente, el .enc es autoritativo:
+// borra el plaintext y sus WAL files.
+// Siempre limpia archivos temporales residuales de crashes anteriores.
+func (d *Daemon) resolveDBState(dbPath string) error {
+	encPath := dbPath + ".enc"
+	walPath := dbPath + "-wal"
+	shmPath := dbPath + "-shm"
+	tmpPath := dbPath + ".tmp"
+	encTmpPath := dbPath + ".enc.tmp"
+
+	// Limpiar archivos temporales residuales de crashes anteriores (ignorar errores).
+	_ = os.Remove(tmpPath)
+	_ = os.Remove(encTmpPath)
+
+	_, dbErr := os.Stat(dbPath)
+	_, encErr := os.Stat(encPath)
+
+	dbExists := dbErr == nil
+	encExists := encErr == nil
+
+	if dbExists && encExists {
+		// Ambos presentes: .enc es autoritativo. Borrar plaintext y WAL files.
+		d.cfg.Logf("WARN resolveDBState: both .db and .db.enc exist — .enc is authoritative, removing plaintext")
+		if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("resolveDBState: remove plaintext db: %w", err)
+		}
+		_ = os.Remove(walPath)
+		_ = os.Remove(shmPath)
+	}
+	// StateNone (ninguno existe), StateDB (solo .db), StateEnc (solo .enc) → OK, sin acción extra.
+	return nil
+}
+
+// decryptDB descifra .enc → .db de forma atómica.
+// Es no-op si .enc no existe (DB ya está en plaintext o primera instalación).
+func (d *Daemon) decryptDB(dbPath string) error {
+	encPath := dbPath + ".enc"
+	tmpPath := dbPath + ".tmp"
+	dbDir := filepath.Dir(dbPath)
+
+	if _, err := os.Stat(encPath); os.IsNotExist(err) {
+		// No hay .enc — nada que descifrar.
+		return nil
+	}
+
+	key, err := crypto.GetOrCreateKey(dbDir)
+	if err != nil {
+		return fmt.Errorf("decryptDB: get key: %w", err)
+	}
+
+	data, err := os.ReadFile(encPath)
+	if err != nil {
+		return fmt.Errorf("decryptDB: read enc file: %w", err)
+	}
+
+	plaintext, err := crypto.Decrypt(key, data)
+	if err != nil {
+		return fmt.Errorf("decryptDB: decrypt: %w", err)
+	}
+
+	// Atomic write: escribir a .db.tmp luego renombrar.
+	if err := os.WriteFile(tmpPath, plaintext, 0600); err != nil {
+		return fmt.Errorf("decryptDB: write tmp: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, dbPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("decryptDB: rename tmp to db: %w", err)
+	}
+
+	// Borrar .enc solo si la escritura del plaintext fue exitosa.
+	if err := os.Remove(encPath); err != nil && !os.IsNotExist(err) {
+		d.cfg.Logf("WARN decryptDB: remove enc file: %v", err)
+	}
+
+	d.cfg.Logf("decryptDB: DB decrypted successfully")
+	return nil
+}
+
+// encryptDB hace checkpoint WAL, cifra .db → .db.enc de forma atómica,
+// y borra el plaintext y sus WAL files.
+// Es no-op si .db no existe.
+func (d *Daemon) encryptDB(dbPath string) error {
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		// No hay .db — nada que cifrar.
+		return nil
+	}
+
+	encTmpPath := dbPath + ".enc.tmp"
+	encPath := dbPath + ".enc"
+	walPath := dbPath + "-wal"
+	shmPath := dbPath + "-shm"
+	dbDir := filepath.Dir(dbPath)
+
+	// Checkpoint WAL para asegurar que .db sea un snapshot consistente.
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_busy_timeout=5000", dbPath))
+	if err != nil {
+		return fmt.Errorf("encryptDB: open db for checkpoint: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		db.Close()
+		return fmt.Errorf("encryptDB: wal_checkpoint: %w", err)
+	}
+	db.Close()
+
+	key, err := crypto.GetOrCreateKey(dbDir)
+	if err != nil {
+		return fmt.Errorf("encryptDB: get key: %w", err)
+	}
+
+	plaintext, err := os.ReadFile(dbPath)
+	if err != nil {
+		return fmt.Errorf("encryptDB: read db: %w", err)
+	}
+
+	ciphertext, err := crypto.Encrypt(key, plaintext)
+	if err != nil {
+		return fmt.Errorf("encryptDB: encrypt: %w", err)
+	}
+
+	// Atomic write: escribir a .enc.tmp luego renombrar.
+	if err := os.WriteFile(encTmpPath, ciphertext, 0600); err != nil {
+		return fmt.Errorf("encryptDB: write enc tmp: %w", err)
+	}
+
+	if err := os.Rename(encTmpPath, encPath); err != nil {
+		_ = os.Remove(encTmpPath)
+		return fmt.Errorf("encryptDB: rename enc tmp to enc: %w", err)
+	}
+
+	// Borrar plaintext y WAL files — ignorar "no existe".
+	_ = os.Remove(dbPath)
+	_ = os.Remove(walPath)
+	_ = os.Remove(shmPath)
+
+	d.cfg.Logf("encryptDB: DB encrypted successfully")
+	return nil
 }
 
 func defaultDBPath() string {

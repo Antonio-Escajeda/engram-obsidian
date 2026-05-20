@@ -23,6 +23,13 @@ func Open(dbPath string) (*Reader, error) {
 		home, _ := os.UserHomeDir()
 		dbPath = filepath.Join(home, dbPath[2:])
 	}
+	// Si la DB está encriptada y no existe el archivo plano → error descriptivo
+	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
+		encPath := dbPath + ".enc"
+		if _, encErr := os.Stat(encPath); encErr == nil {
+			return nil, fmt.Errorf("engram DB is encrypted (%s) — start engram-obsidian daemon to decrypt", encPath)
+		}
+	}
 	dsn := fmt.Sprintf("file:%s", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

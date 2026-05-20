@@ -120,6 +120,19 @@ Controla cómo se generan los links entre notas para el Obsidian graph view.
 
 Se configura en la pantalla de configuración (`--select`) con el campo **Graph mode**.
 
+### Encrypt DB
+
+Cifra `~/.engram/engram.db` en reposo usando AES-256-GCM. La clave se gestiona automáticamente via Linux Keyring (session-bound) con fallback a key file cifrada.
+
+| Estado | Comportamiento |
+|---|---|
+| **Sesión activa** | `engram.db` existe en plaintext — engram MCP funciona normalmente |
+| **Sesión terminada** | Solo existe `engram.db.enc` — inaccesible sin el daemon |
+
+Se configura en la pantalla de configuración (`--select`) con el campo **Encrypt DB** (`space` para activar/desactivar). Desactivado por default.
+
+> **Nota**: si el daemon se detiene con `engram.db.enc` en disco, la DB queda cifrada hasta que el daemon vuelva a correr con sesión activa.
+
 ## Estructura del vault
 
 ```
