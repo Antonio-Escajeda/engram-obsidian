@@ -105,7 +105,6 @@ En la pantalla de configuración:
 - **Vault path**: se pre-rellena automáticamente con la carpeta `Documents` del usuario Windows actual (detección robusta en WSL usando `wslvar`/`wslpath`, `cmd.exe`, `USERPROFILE` y fallback por `/mnt/c/Users`). Podés confirmarlo o cambiarlo; también podés presionar `b` para abrir el selector de carpetas de Windows
 - **DB path**: path a `~/.engram/engram.db`
 - **Graph mode**: `● Star` / `○ Full Mesh` — navegá con `← →` o `Space` para cambiar
-- **Vault Lock**: `● Disabled` / `○ Strict` — endurece `_engram` tras cada sync (Windows-first, best effort)
 - `Tab` para navegar entre campos · `Enter` para continuar a la selección
 
 > **Nota:** la detección automática del vault path solo ocurre en el primer uso. Si ya existe config guardada en `~/.engram/obsidian-selection.json`, se respeta sin sobreescribir.
@@ -143,6 +142,8 @@ Se configura en la pantalla de configuración (`--select`) con el campo **Encryp
 ### Vault Lock
 
 Protege el contenido generado en `_engram` contra modificaciones/borrados accidentales después de cada sync.
+
+> **Estado actual:** la opción quedó temporalmente deshabilitada en la pantalla `--select` mientras se corrige el comportamiento de lock en Windows. Por ahora el flujo usa `disabled`.
 
 | Modo | Comportamiento |
 |---|---|

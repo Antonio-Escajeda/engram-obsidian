@@ -27,7 +27,7 @@ type Model struct {
 	GraphMode   string // "star" | "full_mesh"
 	EncryptDB   bool   // true = encrypt engram.db at rest
 	VaultLock   string // "disabled" | "strict"
-	ConfigFocus int    // 0 = vault, 1 = db, 2 = graphmode, 3 = encryptdb, 4 = vaultlock, 5 = confirmar
+	ConfigFocus int    // 0 = vault, 1 = db, 2 = graphmode, 3 = encryptdb, 4 = confirmar
 
 	// Selection screen
 	Roots  []*TreeNode

@@ -45,11 +45,11 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "tab", "down":
-		m.ConfigFocus = (m.ConfigFocus + 1) % 6
+		m.ConfigFocus = (m.ConfigFocus + 1) % 5
 		return m.updateConfigFocus()
 
 	case "shift+tab", "up":
-		m.ConfigFocus = (m.ConfigFocus + 5) % 6
+		m.ConfigFocus = (m.ConfigFocus + 4) % 5
 		return m.updateConfigFocus()
 
 	case "b":
@@ -81,10 +81,6 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 			m.EncryptDB = false
 			return m, nil
 		}
-		if m.ConfigFocus == 4 {
-			m.VaultLock = "disabled"
-			return m, nil
-		}
 
 	case "right", "l":
 		if m.ConfigFocus == 2 {
@@ -93,10 +89,6 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 		}
 		if m.ConfigFocus == 3 {
 			m.EncryptDB = true
-			return m, nil
-		}
-		if m.ConfigFocus == 4 {
-			m.VaultLock = "strict"
 			return m, nil
 		}
 
@@ -111,14 +103,6 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 		}
 		if m.ConfigFocus == 3 {
 			m.EncryptDB = !m.EncryptDB
-			return m, nil
-		}
-		if m.ConfigFocus == 4 {
-			if m.VaultLock == "strict" {
-				m.VaultLock = "disabled"
-			} else {
-				m.VaultLock = "strict"
-			}
 			return m, nil
 		}
 
@@ -138,14 +122,6 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.ConfigFocus == 4 {
-			if m.VaultLock == "strict" {
-				m.VaultLock = "disabled"
-			} else {
-				m.VaultLock = "strict"
-			}
-			return m, nil
-		}
-		if m.ConfigFocus == 5 {
 			// Confirmar config
 			vault := expandHome(m.VaultInput.Value())
 			db := expandHome(m.DBInput.Value())
@@ -161,7 +137,7 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 			m.Selection.Config.DBPath = contractHome(expandHome(db))
 			m.Selection.Config.GraphMode = m.GraphMode
 			m.Selection.Config.EncryptDB = m.EncryptDB
-			m.Selection.Config.VaultLock = m.VaultLock
+			m.Selection.Config.VaultLock = "disabled"
 			m.StatusMsg = ""
 			m.Screen = ScreenSelection
 			m.Flat = FlatNodes(m.Roots)
@@ -169,7 +145,7 @@ func (m Model) handleConfigKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Enter en un input: avanzar foco
-		m.ConfigFocus = (m.ConfigFocus + 1) % 6
+		m.ConfigFocus = (m.ConfigFocus + 1) % 5
 		return m.updateConfigFocus()
 	}
 
@@ -185,7 +161,7 @@ func (m Model) updateConfigFocus() (tea.Model, tea.Cmd) {
 	case 1:
 		m.VaultInput.Blur()
 		m.DBInput.Focus()
-	case 2, 3, 4, 5:
+	case 2, 3, 4:
 		m.VaultInput.Blur()
 		m.DBInput.Blur()
 	}
