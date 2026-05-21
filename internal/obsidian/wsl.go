@@ -53,15 +53,25 @@ func DetectWSLVaultPath() string {
 // detectViaCmdExe obtiene USERPROFILE invocando cmd.exe y convierte el path
 // a formato /mnt/<drive>/... sin depender de wslvar/wslpath.
 func detectViaCmdExe() string {
-	out, err := exec.Command("cmd.exe", "/C", "echo", "%USERPROFILE%").Output()
-	if err != nil {
-		return ""
+	for _, cmdPath := range []string{
+		"cmd.exe",
+		"/mnt/c/Windows/System32/cmd.exe",
+		"/mnt/c/Windows/SysWOW64/cmd.exe",
+	} {
+		out, err := exec.Command(cmdPath, "/C", "echo", "%USERPROFILE%").Output()
+		if err != nil {
+			continue
+		}
+		winProfile := strings.TrimSpace(string(out))
+		if winProfile == "" || strings.EqualFold(winProfile, "%USERPROFILE%") {
+			continue
+		}
+		if path := windowsProfileToVaultPath(winProfile); path != "" {
+			return path
+		}
 	}
-	winProfile := strings.TrimSpace(string(out))
-	if winProfile == "" {
-		return ""
-	}
-	return windowsProfileToVaultPath(winProfile)
+
+	return ""
 }
 
 // detectViaWslvar usa wslvar para obtener USERPROFILE de Windows y wslpath
@@ -107,7 +117,10 @@ func windowsProfileToVaultPath(winProfile string) string {
 	}
 
 	drive := strings.ToLower(string(normalized[0]))
-	rest := strings.TrimPrefix(normalized[2:], "/")
+	rest := strings.TrimLeft(normalized[2:], "/")
+	for strings.Contains(rest, "//") {
+		rest = strings.ReplaceAll(rest, "//", "/")
+	}
 	linuxProfile := "/mnt/" + drive + "/" + rest
 
 	return linuxProfile + "/Documents/EngramVault"

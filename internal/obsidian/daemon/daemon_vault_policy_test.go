@@ -162,6 +162,26 @@ func TestBootstrapSelectionReplacesInvalidVaultPath(t *testing.T) {
 	}
 }
 
+func TestBootstrapSelectionUsesWindowsDocumentsPathOnWSL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("WSL_DISTRO_NAME", "Ubuntu")
+	t.Setenv("USERPROFILE", `C:\Users\Alice`)
+
+	selectionPath := filepath.Join(t.TempDir(), "obsidian-selection.json")
+	d := New(Config{SelectionPath: selectionPath, Logf: func(string, ...any) {}})
+
+	sel, err := d.loadOrBootstrapSelection()
+	if err != nil {
+		t.Fatalf("bootstrap selection on WSL: %v", err)
+	}
+
+	want := "/mnt/c/Users/Alice/Documents/EngramVault"
+	if got := sel.Config.VaultPath; got != want {
+		t.Fatalf("expected WSL default vault %q, got %q", want, got)
+	}
+}
+
 func TestDoSyncSkipsPopulationOnWSLWhenGateIsNotMet(t *testing.T) {
 	t.Setenv("WSL_DISTRO_NAME", "Ubuntu")
 
