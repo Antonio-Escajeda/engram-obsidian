@@ -160,6 +160,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	var lastSync time.Time
 	var prevConditionsMet bool
 	hasPrevConditions := false
+	selectionUnconfirmedLogged := false
 
 	// Bootstrap: evaluar condiciones y actuar en consecuencia.
 	conditionState := ReadSyncConditionState(d.cfg.Process)
@@ -178,7 +179,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	if !startupSel.IsConfirmed() {
 		d.cfg.Logf("Selection not confirmed — run --select first; skipping sync")
+		selectionUnconfirmedLogged = true
 	} else if conditionsMet {
+		selectionUnconfirmedLogged = false
 		if d.cfg.DaemonMode {
 			d.cfg.Logf("Conditions MET on startup — syncing (daemon mode)")
 			synced, err := d.syncOnly()
@@ -239,9 +242,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 					continue
 				}
 				if !tickSel.IsConfirmed() {
-					d.cfg.Logf("Selection not confirmed — run --select first; skipping sync")
+					if !selectionUnconfirmedLogged {
+						d.cfg.Logf("Selection not confirmed — run --select first; skipping sync")
+						selectionUnconfirmedLogged = true
+					}
 					continue
 				}
+				selectionUnconfirmedLogged = false
 
 				// T3.2 — decryptDB en el loop cuando conditionsMet pasa a true.
 				// Necesitamos el config actualizado — recargar selección para obtener EncryptDB.
