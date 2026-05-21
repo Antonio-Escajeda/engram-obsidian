@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -45,7 +46,8 @@ func DefaultConfig() Config {
 
 // Daemon orquesta el ciclo completo: detección → TUI → sync → cleanup.
 type Daemon struct {
-	cfg Config
+	cfg            Config
+	lockedLoggedAt time.Time
 }
 
 // New crea un Daemon con la configuración dada.
@@ -247,6 +249,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.cfg.Logf("Conditions not met — standby")
 	}
 
+	// LOCKED standby: when LoadKey returns ErrLocked, encrypt/decryptDB are no-ops.
+	// The daemon continues polling. On next tick after su/sudo populates the keyring,
+	// LoadKey succeeds and normal operation resumes.
 	ticker := time.NewTicker(d.cfg.PollInterval)
 	defer ticker.Stop()
 
@@ -588,8 +593,15 @@ func (d *Daemon) decryptDB(dbPath string) error {
 		return nil
 	}
 
-	key, err := crypto.GetOrCreateKey(dbDir)
+	key, err := crypto.LoadKey(dbDir)
 	if err != nil {
+		if errors.Is(err, crypto.ErrLocked) {
+			if time.Since(d.lockedLoggedAt) > time.Minute {
+				d.cfg.Logf("LOCKED — waiting for keyring (run su/sudo or engram-obsidian unlock)")
+				d.lockedLoggedAt = time.Now()
+			}
+			return nil
+		}
 		return fmt.Errorf("decryptDB: get key: %w", err)
 	}
 
@@ -648,8 +660,15 @@ func (d *Daemon) encryptDB(dbPath string) error {
 	}
 	db.Close()
 
-	key, err := crypto.GetOrCreateKey(dbDir)
+	key, err := crypto.LoadKey(dbDir)
 	if err != nil {
+		if errors.Is(err, crypto.ErrLocked) {
+			if time.Since(d.lockedLoggedAt) > time.Minute {
+				d.cfg.Logf("LOCKED — waiting for keyring (run su/sudo or engram-obsidian unlock)")
+				d.lockedLoggedAt = time.Now()
+			}
+			return nil
+		}
 		return fmt.Errorf("encryptDB: get key: %w", err)
 	}
 

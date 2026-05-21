@@ -2,10 +2,13 @@ package daemon
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/crypto"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian"
@@ -312,6 +315,83 @@ func TestEncryptAdditionalCheck(t *testing.T) {
 
 	if string(dec) != string(plain) {
 		t.Errorf("mismatch: got %q, want %q", dec, plain)
+	}
+}
+
+func TestDaemonDecryptDBLockedNoOp(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "engram.db")
+
+	makeTestSQLiteDB(t, dbPath)
+
+	d := newTestDaemon(t)
+	if err := d.encryptDB(dbPath); err != nil {
+		t.Fatalf("encryptDB: %v", err)
+	}
+
+	if _, err := crypto.LoadKey(dir); !errors.Is(err, crypto.ErrLocked) {
+		t.Skip("host keyring is populated; locked path not reproducible")
+	}
+
+	if err := d.decryptDB(dbPath); err != nil {
+		t.Fatalf("decryptDB locked path must be no-op, got: %v", err)
+	}
+
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("expected plaintext db to remain absent, err=%v", err)
+	}
+	if _, err := os.Stat(dbPath + ".enc"); err != nil {
+		t.Fatalf("expected encrypted db to remain present: %v", err)
+	}
+}
+
+func TestDaemonLockedLogRateLimit(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "engram.db")
+
+	makeTestSQLiteDB(t, dbPath)
+
+	if _, err := crypto.LoadKey(dir); !errors.Is(err, crypto.ErrLocked) {
+		t.Skip("host keyring is populated; locked path not reproducible")
+	}
+
+	logs := make([]string, 0, 4)
+	d := New(Config{
+		Logf: func(format string, args ...any) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		},
+	})
+
+	if err := d.encryptDB(dbPath); err != nil {
+		t.Fatalf("encryptDB locked path should be no-op, got: %v", err)
+	}
+	if err := d.encryptDB(dbPath); err != nil {
+		t.Fatalf("encryptDB locked path second call: %v", err)
+	}
+
+	count := 0
+	for _, line := range logs {
+		if strings.Contains(line, "LOCKED — waiting for keyring") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one LOCKED log in rapid calls, got %d logs: %v", count, logs)
+	}
+
+	d.lockedLoggedAt = time.Now().Add(-2 * time.Minute)
+	if err := d.encryptDB(dbPath); err != nil {
+		t.Fatalf("encryptDB locked path third call: %v", err)
+	}
+
+	count = 0
+	for _, line := range logs {
+		if strings.Contains(line, "LOCKED — waiting for keyring") {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("expected second LOCKED log after cooldown, got %d logs: %v", count, logs)
 	}
 }
 
