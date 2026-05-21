@@ -4,7 +4,11 @@ Daemon que sincroniza las memorias de [Engram](https://github.com/Gentleman-Prog
 
 ## Concepto
 
-El daemon puede preparar/crear el vault desde el bootstrap, pero **solo lo puebla** cuando Obsidian está abierto **y** hay una sesión root activa. Al cerrar cualquiera de las dos, los archivos se eliminan automáticamente. Las memorias viven en Engram — Obsidian es solo una vista temporal.
+El daemon puede preparar/crear el vault desde el bootstrap, pero **solo lo puebla** cuando Obsidian está abierto **y** hay una sesión root activa.
+
+En una instalación nueva, el vault se crea vacío y no se sincroniza nada hasta que el usuario ejecute `engram-obsidian --select` y confirme la selección.
+
+Al cerrar cualquiera de las dos condiciones (Obsidian o sesión root), los archivos se eliminan automáticamente. Las memorias viven en Engram — Obsidian es solo una vista temporal.
 
 ## Estructura del proyecto
 
@@ -67,7 +71,9 @@ El script es idempotente — funciona tanto para instalación nueva como para ac
 - Habilita e inicia el servicio (o lo reinicia si ya estaba activo)
 - Al terminar muestra el estado del servicio
 
-Si es la primera vez, el script te recuerda correr `engram-obsidian --select` para configurar el vault.
+Si es la primera vez, el script te recuerda correr `engram-obsidian --select` para configurar y confirmar selección.
+
+> **Primera instalación:** el directorio del vault se crea vacío para que puedas abrirlo/seleccionarlo en Obsidian inmediatamente. La primera sincronización ocurre recién después de `--select`.
 
 ### Para actualizar
 
