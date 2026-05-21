@@ -61,7 +61,7 @@ install_pam_helper() {
     if [[ -f "$PAM_HELPER_SRC/main.go" ]]; then
         go build -o "$PAM_HELPER_DST" "$PAM_HELPER_SRC"
     else
-        GONOSUMCHECK=* GOPROXY=direct GOBIN="/usr/local/bin" go install github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-pam-helper@main
+        GOTOOLCHAIN=local GONOSUMCHECK=* GOPROXY=direct GOBIN="/usr/local/bin" go install -buildvcs=false github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-pam-helper@main
     fi
     chmod 0755 "$PAM_HELPER_DST"
 }
