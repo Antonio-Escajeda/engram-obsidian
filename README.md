@@ -56,6 +56,13 @@ engram-obsidian/
 curl -fsSL https://raw.githubusercontent.com/Antonio-Escajeda/engram-obsidian/main/install.sh | bash
 ```
 
+> Este comando instala/actualiza el daemon en modo usuario sin requerir `sudo`.
+> Para completar la integración PAM del sistema, ejecuta luego:
+>
+> ```bash
+> sudo bash install.sh --pam
+> ```
+
 ### Desde el repo local
 
 ```bash
