@@ -67,10 +67,8 @@ func (d *Daemon) RunOnce() error {
 		return fmt.Errorf("select cycle: load selection: %w", err)
 	}
 
-	dbPath := expandHomePath(sel.Config.DBPath)
-	if dbPath == "" {
-		dbPath = defaultDBPath()
-	}
+	dbPath, restoreDBState := d.prepareSelectionDB(sel)
+	defer restoreDBState()
 
 	var observations []store.Observation
 	if dbPath != "" {
@@ -117,6 +115,34 @@ func (d *Daemon) RunOnce() error {
 	}
 	d.cfg.Logf("--select sync complete — exiting")
 	return nil
+}
+
+func (d *Daemon) prepareSelectionDB(sel *obsidian.Selection) (string, func()) {
+	dbPath := expandHomePath(sel.Config.DBPath)
+	if dbPath == "" {
+		dbPath = defaultDBPath()
+	}
+
+	restore := func() {}
+	if !sel.Config.EncryptDBEnabled() {
+		return dbPath, restore
+	}
+
+	encPath := dbPath + ".enc"
+	if _, err := os.Stat(encPath); err != nil {
+		return dbPath, restore
+	}
+
+	if err := d.decryptDB(dbPath); err != nil {
+		d.cfg.Logf("WARN decryptDB for selection: %v", err)
+		return dbPath, restore
+	}
+
+	return dbPath, func() {
+		if err := d.encryptDB(dbPath); err != nil {
+			d.cfg.Logf("WARN encryptDB restore after selection: %v", err)
+		}
+	}
 }
 
 // Run ejecuta el daemon hasta que el contexto sea cancelado.
