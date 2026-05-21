@@ -86,6 +86,21 @@ git pull
 
 El script detecta que el servicio ya está activo y lo reinicia automáticamente.
 
+### Configuración PAM (opcional, recomendado en WSL/Linux)
+
+Para habilitar desbloqueo automático del keyring al usar `su`/`sudo`, corré:
+
+```bash
+sudo bash install.sh --pam
+```
+
+Este modo:
+- Instala `engram-pam-helper` en `/usr/local/bin/engram-pam-helper`
+- Detecta el archivo PAM del sistema (`/etc/pam.d/su` o `/etc/pam.d/su-l`)
+- Inserta hooks `pam_exec` como `optional` de forma idempotente (sin duplicar líneas)
+
+> Si corrés `install.sh` sin privilegios, el script continúa la instalación normal y te indica ejecutar `sudo bash install.sh --pam` para completar el wiring PAM.
+
 ## Uso
 
 | Comando | Comportamiento |
