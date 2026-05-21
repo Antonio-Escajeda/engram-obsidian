@@ -1,10 +1,10 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Screen identifica la pantalla activa.
@@ -17,16 +17,17 @@ const (
 
 // Model es el modelo Bubbletea de la TUI.
 type Model struct {
-	Screen  Screen
-	Width   int
-	Height  int
+	Screen Screen
+	Width  int
+	Height int
 
 	// Config screen
 	VaultInput  textinput.Model
 	DBInput     textinput.Model
 	GraphMode   string // "star" | "full_mesh"
 	EncryptDB   bool   // true = encrypt engram.db at rest
-	ConfigFocus int    // 0 = vault, 1 = db, 2 = graphmode, 3 = encryptdb, 4 = confirmar
+	VaultLock   string // "disabled" | "strict"
+	ConfigFocus int    // 0 = vault, 1 = db, 2 = graphmode, 3 = encryptdb, 4 = vaultlock, 5 = confirmar
 
 	// Selection screen
 	Roots  []*TreeNode
@@ -66,6 +67,7 @@ func New(sel *obsidian.Selection, observations []store.Observation) Model {
 
 	graphMode := sel.Config.GraphModeOrDefault()
 	encryptDB := sel.Config.EncryptDB
+	vaultLock := sel.Config.VaultLockModeOrDefault()
 
 	// Determinar pantalla inicial
 	screen := ScreenConfig
@@ -87,6 +89,7 @@ func New(sel *obsidian.Selection, observations []store.Observation) Model {
 		DBInput:      dbInput,
 		GraphMode:    graphMode,
 		EncryptDB:    encryptDB,
+		VaultLock:    vaultLock,
 		Roots:        roots,
 		Flat:         flat,
 		Selection:    sel,

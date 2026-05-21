@@ -105,6 +105,7 @@ En la pantalla de configuración:
 - **Vault path**: se pre-rellena automáticamente con la carpeta `Documents` del usuario Windows actual (detección robusta en WSL usando `wslvar`/`wslpath`, `cmd.exe`, `USERPROFILE` y fallback por `/mnt/c/Users`). Podés confirmarlo o cambiarlo; también podés presionar `b` para abrir el selector de carpetas de Windows
 - **DB path**: path a `~/.engram/engram.db`
 - **Graph mode**: `● Star` / `○ Full Mesh` — navegá con `← →` o `Space` para cambiar
+- **Vault Lock**: `● Disabled` / `○ Strict` — endurece `_engram` tras cada sync (Windows-first, best effort)
 - `Tab` para navegar entre campos · `Enter` para continuar a la selección
 
 > **Nota:** la detección automática del vault path solo ocurre en el primer uso. Si ya existe config guardada en `~/.engram/obsidian-selection.json`, se respeta sin sobreescribir.
@@ -138,6 +139,20 @@ Cifra `~/.engram/engram.db` en reposo usando AES-256-GCM. La clave se gestiona a
 Se configura en la pantalla de configuración (`--select`) con el campo **Encrypt DB** (`space` para activar/desactivar). Desactivado por default.
 
 > **Nota**: si el daemon se detiene con `engram.db.enc` en disco, la DB queda cifrada hasta que el daemon vuelva a correr con sesión activa.
+
+### Vault Lock
+
+Protege el contenido generado en `_engram` contra modificaciones/borrados accidentales después de cada sync.
+
+| Modo | Comportamiento |
+|---|---|
+| **Disabled** (default) | No aplica lock extra al vault generado. |
+| **Strict** | Antes de cleanup/sync intenta unlock; después de sync aplica readonly y luego intenta lock avanzado en Windows. |
+
+Detalles de implementación (Windows-first):
+- Base siempre disponible: permisos readonly en archivos/directorios de `_engram`.
+- Intentos avanzados (best effort): `attrib`/`icacls` vía `cmd.exe` desde WSL interop cuando la ruta está en `/mnt/<drive>/...`.
+- Si los pasos avanzados fallan o no están disponibles, el daemon loguea warning claro y sigue con readonly best effort (no rompe el loop).
 
 ## Estructura del vault
 

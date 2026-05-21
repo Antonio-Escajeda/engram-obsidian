@@ -451,6 +451,8 @@ func (d *Daemon) doSync(sel *obsidian.Selection) (bool, error) {
 		}
 	}
 
+	d.unlockVaultForSync(sel)
+
 	dbPath := expandHomePath(sel.Config.DBPath)
 	reader, err := store.Open(dbPath)
 	if err != nil {
@@ -471,6 +473,7 @@ func (d *Daemon) doSync(sel *obsidian.Selection) (bool, error) {
 
 	d.cfg.Logf("Sync complete: created=%d updated=%d deleted=%d skipped=%d errors=%d",
 		result.Created, result.Updated, result.Deleted, result.Skipped, len(result.Errors))
+	d.lockVaultAfterSync(sel)
 
 	return true, nil
 }
@@ -483,6 +486,7 @@ func (d *Daemon) cleanup() bool {
 	if err != nil || !sel.HasConfig() {
 		return false
 	}
+	d.unlockVaultForSync(sel)
 	exp := obsidian.NewExporter(sel.Config.VaultPath, sel.Config.GraphModeOrDefault(), d.cfg.Logf)
 	if err := exp.Cleanup(); err != nil {
 		d.cfg.Logf("WARN cleanup: %v", err)

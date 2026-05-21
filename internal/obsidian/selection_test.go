@@ -41,3 +41,33 @@ func TestLoadSelectionMissingFileStartsUnconfirmed(t *testing.T) {
 		t.Fatal("expected missing selection bootstrap state to be unconfirmed")
 	}
 }
+
+func TestVaultLockDefaultAndStrictPersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "selection.json")
+
+	sel := &Selection{Version: 1, Selected: map[string]ProjectSelection{}}
+	if err := sel.Save(path); err != nil {
+		t.Fatalf("save selection: %v", err)
+	}
+
+	loaded, err := LoadSelection(path)
+	if err != nil {
+		t.Fatalf("load selection: %v", err)
+	}
+	if got := loaded.Config.VaultLockModeOrDefault(); got != "disabled" {
+		t.Fatalf("expected default vault lock disabled, got %q", got)
+	}
+
+	loaded.Config.VaultLock = "strict"
+	if err := loaded.Save(path); err != nil {
+		t.Fatalf("save strict selection: %v", err)
+	}
+
+	reloaded, err := LoadSelection(path)
+	if err != nil {
+		t.Fatalf("reload selection: %v", err)
+	}
+	if got := reloaded.Config.VaultLockModeOrDefault(); got != "strict" {
+		t.Fatalf("expected strict persisted mode, got %q", got)
+	}
+}

@@ -87,9 +87,24 @@ func (m Model) viewConfig() string {
 	}
 	sb.WriteString(encryptLine + "\n\n")
 
+	// Vault lock toggle
+	vaultLockDisabled := "○ Disabled"
+	vaultLockStrict := "○ Strict"
+	if m.VaultLock == "strict" {
+		vaultLockStrict = "● Strict"
+	} else {
+		vaultLockDisabled = "● Disabled"
+	}
+	vaultLockLine := fmt.Sprintf("  Vault Lock:  %s  %s", vaultLockDisabled, vaultLockStrict)
+	if m.ConfigFocus == 4 {
+		vaultLockLine = styleFocused.Render("▶ Vault Lock: ") + fmt.Sprintf(" %s  %s", vaultLockDisabled, vaultLockStrict)
+		vaultLockLine += "   " + styleHint.Render("(space para cambiar)")
+	}
+	sb.WriteString(vaultLockLine + "\n\n")
+
 	// Botón confirmar
 	btn := "  [ Continuar ]"
-	if m.ConfigFocus == 4 {
+	if m.ConfigFocus == 5 {
 		btn = styleFocused.Render("▶ [ Continuar ]")
 	}
 	sb.WriteString(btn + "\n\n")
