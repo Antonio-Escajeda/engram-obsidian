@@ -124,12 +124,21 @@ func (d *Daemon) prepareSelectionDB(sel *obsidian.Selection) (string, func()) {
 	}
 
 	restore := func() {}
-	if !sel.Config.EncryptDBEnabled() {
-		return dbPath, restore
+	encPath := dbPath + ".enc"
+	_, encErr := os.Stat(encPath)
+	_, dbErr := os.Stat(dbPath)
+
+	needsDecrypt := false
+	if encErr == nil {
+		if sel.Config.EncryptDBEnabled() {
+			needsDecrypt = true
+		} else if os.IsNotExist(dbErr) {
+			// Compatibilidad: DB cifrada en disco con selección que aún marca encrypt_db=false.
+			needsDecrypt = true
+		}
 	}
 
-	encPath := dbPath + ".enc"
-	if _, err := os.Stat(encPath); err != nil {
+	if !needsDecrypt {
 		return dbPath, restore
 	}
 

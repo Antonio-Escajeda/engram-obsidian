@@ -347,3 +347,33 @@ func TestPrepareSelectionDBDecryptsAndRestoresEncryptedDB(t *testing.T) {
 		t.Fatalf("expected plaintext .db removed after restore, err=%v", err)
 	}
 }
+
+func TestPrepareSelectionDBDecryptsWhenEncExistsEvenIfFlagFalse(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "engram.db")
+	makeTestSQLiteDB(t, dbPath)
+
+	d := newTestDaemon(t)
+	if err := d.encryptDB(dbPath); err != nil {
+		t.Fatalf("encryptDB: %v", err)
+	}
+
+	sel := &obsidian.Selection{Config: obsidian.Config{DBPath: dbPath, EncryptDB: false}}
+	preparedPath, restore := d.prepareSelectionDB(sel)
+	if preparedPath != dbPath {
+		t.Fatalf("prepareSelectionDB path mismatch: got %q want %q", preparedPath, dbPath)
+	}
+
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("expected plaintext .db during selection: %v", err)
+	}
+
+	restore()
+
+	if _, err := os.Stat(dbPath + ".enc"); err != nil {
+		t.Fatalf("expected .enc restored after selection: %v", err)
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("expected plaintext .db removed after restore, err=%v", err)
+	}
+}
