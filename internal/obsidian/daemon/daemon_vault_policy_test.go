@@ -15,7 +15,8 @@ import (
 func testSelectionPath(t *testing.T, vaultPath string) string {
 	t.Helper()
 	sel := &obsidian.Selection{
-		Version: 1,
+		Version:   1,
+		Confirmed: true,
 		Config: obsidian.Config{
 			VaultPath: vaultPath,
 			DBPath:    filepath.Join(vaultPath, "engram.db"),
@@ -125,6 +126,9 @@ func TestBootstrapSelectionCreatesDefaultVaultWhenMissing(t *testing.T) {
 	if sel.Config.DBPath == "" {
 		t.Fatal("expected db path to be auto-created")
 	}
+	if sel.Confirmed {
+		t.Fatal("expected bootstrap selection to require explicit --select confirmation")
+	}
 
 	if _, err := os.Stat(sel.Config.VaultPath); err != nil {
 		t.Fatalf("expected default vault directory to exist: %v", err)
@@ -195,7 +199,8 @@ func TestDoSyncSkipsPopulationOnWSLWhenGateIsNotMet(t *testing.T) {
 	})
 
 	sel := &obsidian.Selection{
-		Version: 1,
+		Version:   1,
+		Confirmed: true,
 		Config: obsidian.Config{
 			VaultPath: vaultPath,
 			DBPath:    filepath.Join(vaultPath, "engram.db"),
@@ -214,5 +219,37 @@ func TestDoSyncSkipsPopulationOnWSLWhenGateIsNotMet(t *testing.T) {
 	joined := strings.Join(logs, "\n")
 	if !strings.Contains(joined, "Vault population gate: skip export on WSL") {
 		t.Fatalf("expected gate skip log, got: %s", joined)
+	}
+}
+
+func TestDoSyncSkipsWhenSelectionNotConfirmed(t *testing.T) {
+	vaultPath := t.TempDir()
+	logs := make([]string, 0, 4)
+	d := New(Config{
+		Logf: func(format string, args ...any) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		},
+	})
+
+	sel := &obsidian.Selection{
+		Version: 1,
+		Config: obsidian.Config{
+			VaultPath: vaultPath,
+			DBPath:    filepath.Join(vaultPath, "engram.db"),
+		},
+		Selected: map[string]obsidian.ProjectSelection{},
+	}
+
+	synced, err := d.doSync(sel)
+	if err != nil {
+		t.Fatalf("doSync should skip without error when selection is not confirmed: %v", err)
+	}
+	if synced {
+		t.Fatal("expected doSync to skip when selection is not confirmed")
+	}
+
+	joined := strings.Join(logs, "\n")
+	if !strings.Contains(joined, "Selection not confirmed") {
+		t.Fatalf("expected selection confirmation skip log, got: %s", joined)
 	}
 }

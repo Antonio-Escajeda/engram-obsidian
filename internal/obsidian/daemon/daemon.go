@@ -101,6 +101,7 @@ func (d *Daemon) RunOnce() error {
 
 	updatedSel := tui.ToSelection(m.Roots, m.Selection)
 	updatedSel.Config = m.Selection.Config
+	updatedSel.Confirmed = true
 	if err := updatedSel.Save(d.cfg.SelectionPath); err != nil {
 		d.cfg.Logf("WARN save selection: %v", err)
 	}
@@ -175,7 +176,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			}
 		}
 	}
-	if conditionsMet {
+	if !startupSel.IsConfirmed() {
+		d.cfg.Logf("Selection not confirmed — run --select first; skipping sync")
+	} else if conditionsMet {
 		if d.cfg.DaemonMode {
 			d.cfg.Logf("Conditions MET on startup — syncing (daemon mode)")
 			synced, err := d.syncOnly()
@@ -230,10 +233,19 @@ func (d *Daemon) Run(ctx context.Context) error {
 			hasPrevConditions = true
 
 			if !wasSynced && conditionsMet {
+				tickSel, selErr := obsidian.LoadSelection(d.cfg.SelectionPath)
+				if selErr != nil {
+					d.cfg.Logf("WARN load selection: %v", selErr)
+					continue
+				}
+				if !tickSel.IsConfirmed() {
+					d.cfg.Logf("Selection not confirmed — run --select first; skipping sync")
+					continue
+				}
+
 				// T3.2 — decryptDB en el loop cuando conditionsMet pasa a true.
 				// Necesitamos el config actualizado — recargar selección para obtener EncryptDB.
-				tickSel, selErr := obsidian.LoadSelection(d.cfg.SelectionPath)
-				if selErr == nil && tickSel.Config.EncryptDBEnabled() {
+				if tickSel.Config.EncryptDBEnabled() {
 					tickDBPath := expandHomePath(tickSel.Config.DBPath)
 					if tickDBPath == "" {
 						tickDBPath = defaultDBPath()
@@ -396,6 +408,7 @@ func (d *Daemon) runCycle() (bool, error) {
 	// Guardar selección
 	updatedSel := tui.ToSelection(m.Roots, m.Selection)
 	updatedSel.Config = m.Selection.Config
+	updatedSel.Confirmed = true
 	if err := updatedSel.Save(d.cfg.SelectionPath); err != nil {
 		d.cfg.Logf("WARN save selection: %v", err)
 	}
@@ -417,6 +430,10 @@ func (d *Daemon) syncOnly() (bool, error) {
 func (d *Daemon) doSync(sel *obsidian.Selection) (bool, error) {
 	if !sel.HasConfig() {
 		return false, fmt.Errorf("selection has no config (vault/db path missing)")
+	}
+	if !sel.IsConfirmed() {
+		d.cfg.Logf("Selection not confirmed — run --select first; skipping sync")
+		return false, nil
 	}
 
 	if obsidian.IsWSLEnvironment() {

@@ -52,9 +52,10 @@ func (c Config) EncryptDBEnabled() bool {
 
 // Selection es la selección persistida completa.
 type Selection struct {
-	Version      int                        `json:"version"`
-	LastModified time.Time                  `json:"last_modified"`
-	Config       Config                     `json:"config"`
+	Version      int                         `json:"version"`
+	LastModified time.Time                   `json:"last_modified"`
+	Config       Config                      `json:"config"`
+	Confirmed    bool                        `json:"confirmed"`
 	Selected     map[string]ProjectSelection `json:"selected"` // clave: project name
 }
 
@@ -77,9 +78,18 @@ func LoadSelection(path string) (*Selection, error) {
 	if err != nil {
 		return nil, err
 	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
 	var s Selection
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
+	}
+	if _, hasConfirmed := raw["confirmed"]; !hasConfirmed {
+		// Backward compatibility: legacy selection files were effectively user-approved.
+		s.Confirmed = true
 	}
 	if s.Selected == nil {
 		s.Selected = make(map[string]ProjectSelection)
@@ -108,6 +118,11 @@ func (s *Selection) IsEmpty() bool {
 // HasConfig retorna true si vault path y db path están configurados.
 func (s *Selection) HasConfig() bool {
 	return s.Config.VaultPath != "" && s.Config.DBPath != ""
+}
+
+// IsConfirmed retorna true si el usuario confirmó explícitamente la selección.
+func (s *Selection) IsConfirmed() bool {
+	return s.Confirmed
 }
 
 // SelectProject marca un proyecto completo como seleccionado.
