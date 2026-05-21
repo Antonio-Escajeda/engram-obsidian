@@ -177,3 +177,11 @@ Cada nota linkea solo a su mes. El mes linkea al año, el año al proyecto — j
 ```bash
 journalctl --user -u engram-obsidian.service -f
 ```
+
+## Validación rápida post-instalación
+
+Podés ejecutar una validación semiautomática del estado del servicio, selección, ruta de vault y eventos clave de sync/cleanup:
+
+```bash
+./scripts/validate-install.sh
+```

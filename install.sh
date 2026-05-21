@@ -15,15 +15,47 @@ fi
 echo "-> Verificando ~/.local/bin/ ..."
 mkdir -p "$HOME/.local/bin"
 
+# Asegurar detección de Go instalado en ~/.local/go incluso en shells no interactivos
+if [[ -x "$HOME/.local/go/bin/go" ]]; then
+    export PATH="$HOME/.local/go/bin:$PATH"
+fi
+
 # 2. Instalar Go si no existe o version < 1.24
+resolve_go_cmd() {
+    if command -v go >/dev/null 2>&1; then
+        command -v go
+    elif [[ -x "$HOME/.local/go/bin/go" ]]; then
+        printf '%s\n' "$HOME/.local/go/bin/go"
+    else
+        return 1
+    fi
+}
+
+parse_go_major_minor() {
+    local go_cmd version
+    go_cmd=$(resolve_go_cmd) || return 1
+    version=$($go_cmd version 2>/dev/null | sed -n 's/.*go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p')
+    [[ -n "$version" ]] || return 1
+    printf '%s\n' "$version"
+}
+
 go_version_ok() {
-    local ver
-    ver=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
-    [[ -n "$ver" ]] && awk "BEGIN {exit !($ver >= 1.24)}"
+    local major minor
+    read -r major minor < <(parse_go_major_minor) || return 1
+    if (( major > 1 )); then
+        return 0
+    fi
+    (( major == 1 && minor >= 24 ))
+}
+
+go_version_display() {
+    local go_cmd
+    go_cmd=$(resolve_go_cmd) || return 1
+    $go_cmd version 2>/dev/null | sed -n 's/.*\(go[0-9][0-9]*\.[0-9][0-9]*\(\.[0-9][0-9]*\)\?\).*/\1/p'
 }
 
 if go_version_ok; then
-    echo "-> Go $(go version | grep -oP 'go\K[0-9.]+') ya instalado — OK"
+    echo "-> Go $(go_version_display) ya instalado — OK"
 else
     echo "-> Go 1.24+ no encontrado — instalando..."
 
@@ -69,7 +101,7 @@ else
     fi
 
     GO_INSTALLED=true
-    echo "   Go $(go version | grep -oP 'go\K[0-9.]+') instalado correctamente"
+    echo "   Go $(go_version_display) instalado correctamente"
 fi
 
 # 3. Instalar engram si no existe
