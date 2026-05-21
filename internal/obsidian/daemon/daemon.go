@@ -11,15 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/crypto"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/obsidian/tui"
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
+	tea "github.com/charmbracelet/bubbletea"
 	_ "modernc.org/sqlite"
 )
-
-const cleanupConfirmPolls = 2
 
 // Config es la configuración del daemon.
 type Config struct {
@@ -64,7 +62,7 @@ func New(cfg Config) *Daemon {
 func (d *Daemon) RunOnce() error {
 	d.cfg.Logf("engram-obsidian --select: one-shot mode")
 
-	sel, err := obsidian.LoadSelection(d.cfg.SelectionPath)
+	sel, err := d.loadOrBootstrapSelection()
 	if err != nil {
 		return fmt.Errorf("select cycle: load selection: %w", err)
 	}
@@ -126,7 +124,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// T3.5 — flock para instancia única.
 	// Cargar selección aquí para obtener dbPath antes de cualquier otra operación.
-	startupSel, err := obsidian.LoadSelection(d.cfg.SelectionPath)
+	startupSel, err := d.loadOrBootstrapSelection()
 	if err != nil {
 		return fmt.Errorf("run: load selection for lock: %w", err)
 	}
@@ -158,11 +156,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.cfg.Logf("Vault content detected on startup — will enforce cleanup if conditions not met")
 	}
 
-	cleanupCountdown := 0
 	var lastSync time.Time
+	var prevConditionsMet bool
+	hasPrevConditions := false
 
 	// Bootstrap: evaluar condiciones y actuar en consecuencia.
-	conditionsMet := ShouldSync(d.cfg.Process)
+	conditionState := ReadSyncConditionState(d.cfg.Process)
+	conditionsMet := conditionState.Met()
+	d.cfg.Logf("Condition check (startup): %s -> met=%t", conditionState.String(), conditionsMet)
+	prevConditionsMet = conditionsMet
+	hasPrevConditions = true
 	if conditionsMet {
 		// T3.2 — decryptDB en el path de bootstrap cuando conditionsMet es true.
 		if startupSel.Config.EncryptDBEnabled() {
@@ -175,9 +178,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if conditionsMet {
 		if d.cfg.DaemonMode {
 			d.cfg.Logf("Conditions MET on startup — syncing (daemon mode)")
-			if err := d.syncOnly(); err != nil {
+			synced, err := d.syncOnly()
+			if err != nil {
 				d.cfg.Logf("WARN startup sync: %v", err)
-			} else {
+			} else if synced {
 				wasSynced = true
 				lastSync = time.Now()
 			}
@@ -217,9 +221,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return ctx.Err()
 
 		case <-ticker.C:
-			// Evaluar condiciones UNA sola vez por tick para evitar
-			// dobles llamadas a ObsidianRunning() (tasklist.exe es costoso).
-			conditionsMet = ShouldSync(d.cfg.Process)
+			conditionState = ReadSyncConditionState(d.cfg.Process)
+			conditionsMet = conditionState.Met()
+			if !hasPrevConditions || prevConditionsMet != conditionsMet {
+				d.cfg.Logf("Condition transition: %s -> met=%t", conditionState.String(), conditionsMet)
+			}
+			prevConditionsMet = conditionsMet
+			hasPrevConditions = true
 
 			if !wasSynced && conditionsMet {
 				// T3.2 — decryptDB en el loop cuando conditionsMet pasa a true.
@@ -238,12 +246,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 				if d.cfg.DaemonMode {
 					d.cfg.Logf("Conditions MET — syncing (daemon mode)")
-					if err := d.syncOnly(); err != nil {
+					synced, err := d.syncOnly()
+					if err != nil {
 						d.cfg.Logf("WARN sync: %v", err)
-					} else {
+					} else if synced {
 						wasSynced = true
 						lastSync = time.Now()
-						cleanupCountdown = 0
 					}
 				} else {
 					d.cfg.Logf("Conditions MET — launching TUI")
@@ -254,53 +262,92 @@ func (d *Daemon) Run(ctx context.Context) error {
 					wasSynced = synced
 					if synced {
 						lastSync = time.Now()
-						cleanupCountdown = 0
 					}
 				}
 
 			} else if !conditionsMet && (wasSynced || d.vaultHasContent()) {
-				// Usar !conditionsMet en vez de ShouldCleanup() para evitar
-				// una segunda llamada a ObsidianRunning() en el mismo tick.
-				cleanupCountdown++
-				d.cfg.Logf("Conditions lost (%d/%d) — waiting to confirm cleanup", cleanupCountdown, cleanupConfirmPolls)
-				if cleanupCountdown >= cleanupConfirmPolls {
-					d.cfg.Logf("Cleaning up vault")
-					// T3.3 — encryptDB antes de cleanup cuando EncryptDB está habilitado.
-					cleanupSel, selErr := obsidian.LoadSelection(d.cfg.SelectionPath)
-					if selErr == nil && cleanupSel.Config.EncryptDBEnabled() {
-						cleanupDBPath := expandHomePath(cleanupSel.Config.DBPath)
-						if cleanupDBPath == "" {
-							cleanupDBPath = defaultDBPath()
-						}
-						if err := d.encryptDB(cleanupDBPath); err != nil {
-							d.cfg.Logf("WARN encryptDB: %v — retrying next tick", err)
-							continue // No resetear cleanupCountdown; reintentar en el próximo tick.
-						}
+				d.cfg.Logf("Conditions not met — cleaning _engram vault content")
+				// T3.3 — encryptDB antes de cleanup cuando EncryptDB está habilitado.
+				cleanupSel, selErr := obsidian.LoadSelection(d.cfg.SelectionPath)
+				if selErr == nil && cleanupSel.Config.EncryptDBEnabled() {
+					cleanupDBPath := expandHomePath(cleanupSel.Config.DBPath)
+					if cleanupDBPath == "" {
+						cleanupDBPath = defaultDBPath()
 					}
-					if d.cleanup() {
-						wasSynced = false
-						cleanupCountdown = 0
+					if err := d.encryptDB(cleanupDBPath); err != nil {
+						d.cfg.Logf("WARN encryptDB: %v — retrying next tick", err)
+						continue
 					}
+				}
+				if d.cleanup() {
+					wasSynced = false
 				}
 
 			} else if wasSynced && conditionsMet {
 				// Re-sync periódico
-				cleanupCountdown = 0
 				if time.Since(lastSync) >= d.cfg.SyncInterval {
 					d.cfg.Logf("Periodic re-sync")
-					if err := d.syncOnly(); err != nil {
+					synced, err := d.syncOnly()
+					if err != nil {
 						d.cfg.Logf("WARN periodic sync: %v", err)
-					} else {
+					} else if synced {
 						lastSync = time.Now()
 					}
 				}
 
-			} else {
-				// wasSynced=false, conditionsMet=false
-				cleanupCountdown = 0
 			}
 		}
 	}
+}
+
+// loadOrBootstrapSelection garantiza que exista una selección utilizable para el daemon.
+// Política:
+// - Si vault_path configurado existe, se respeta tal cual.
+// - Si falta o es inválido, se crea un vault por default en Documents/EngramVault.
+// - Siempre asegura que vault, db dir y selection file existan cuando realiza bootstrap.
+func (d *Daemon) loadOrBootstrapSelection() (*obsidian.Selection, error) {
+	sel, err := obsidian.LoadSelection(d.cfg.SelectionPath)
+	if err != nil {
+		return nil, err
+	}
+
+	changed := false
+	vaultPath := strings.TrimSpace(expandHomePath(sel.Config.VaultPath))
+	if vaultPath != "" {
+		if info, statErr := os.Stat(vaultPath); statErr == nil && info.IsDir() {
+			sel.Config.VaultPath = vaultPath
+		} else {
+			vaultPath = ""
+		}
+	}
+
+	if vaultPath == "" {
+		vaultPath = defaultVaultPath()
+		sel.Config.VaultPath = vaultPath
+		changed = true
+	}
+
+	dbPath := strings.TrimSpace(expandHomePath(sel.Config.DBPath))
+	if dbPath == "" {
+		dbPath = defaultDBPath()
+		sel.Config.DBPath = dbPath
+		changed = true
+	}
+
+	if err := os.MkdirAll(vaultPath, 0755); err != nil {
+		return nil, fmt.Errorf("bootstrap vault dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		return nil, fmt.Errorf("bootstrap db dir: %w", err)
+	}
+
+	if changed || !sel.HasConfig() {
+		if err := sel.Save(d.cfg.SelectionPath); err != nil {
+			return nil, fmt.Errorf("bootstrap selection save: %w", err)
+		}
+	}
+
+	return sel, nil
 }
 
 // runCycle lanza la TUI, obtiene la selección, y sincroniza.
@@ -358,19 +405,26 @@ func (d *Daemon) runCycle() (bool, error) {
 }
 
 // syncOnly re-sincroniza sin abrir la TUI (para re-syncs periódicos).
-func (d *Daemon) syncOnly() error {
+func (d *Daemon) syncOnly() (bool, error) {
 	sel, err := obsidian.LoadSelection(d.cfg.SelectionPath)
 	if err != nil {
-		return fmt.Errorf("load selection: %w", err)
+		return false, fmt.Errorf("load selection: %w", err)
 	}
-	_, err = d.doSync(sel)
-	return err
+	return d.doSync(sel)
 }
 
 // doSync lee el DB y exporta al vault.
 func (d *Daemon) doSync(sel *obsidian.Selection) (bool, error) {
 	if !sel.HasConfig() {
 		return false, fmt.Errorf("selection has no config (vault/db path missing)")
+	}
+
+	if obsidian.IsWSLEnvironment() {
+		conditionState := ReadSyncConditionState(d.cfg.Process)
+		if !conditionState.Met() {
+			d.cfg.Logf("Vault population gate: skip export on WSL (%s)", conditionState.String())
+			return false, nil
+		}
 	}
 
 	dbPath := expandHomePath(sel.Config.DBPath)
@@ -568,6 +622,14 @@ func (d *Daemon) encryptDB(dbPath string) error {
 func defaultDBPath() string {
 	home, _ := os.UserHomeDir()
 	return home + "/.engram/engram.db"
+}
+
+func defaultVaultPath() string {
+	if detected := obsidian.DetectWSLVaultPath(); strings.TrimSpace(detected) != "" {
+		return detected
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Documents", "EngramVault")
 }
 
 func expandHomePath(path string) string {

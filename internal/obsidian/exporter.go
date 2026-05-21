@@ -459,6 +459,9 @@ func (e *Exporter) Cleanup() error {
 		e.logf("WARN save workspace state: %v", err)
 	}
 	engramAbs := e.EngramRoot()
+	if !isPathInsideBase(e.vaultPath, engramAbs) {
+		return fmt.Errorf("remove engram dir: unsafe path %q outside vault %q", engramAbs, e.vaultPath)
+	}
 	if err := os.RemoveAll(engramAbs); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove engram dir: %w", err)
 	}
@@ -468,6 +471,18 @@ func (e *Exporter) Cleanup() error {
 	return nil
 }
 
+func isPathInsideBase(base, target string) bool {
+	if base == "" || target == "" {
+		return false
+	}
+	baseClean := filepath.Clean(base)
+	targetClean := filepath.Clean(target)
+	rel, err := filepath.Rel(baseClean, targetClean)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
 
 // monthDirForObs returns the month directory name (e.g. "05-mayo") for an observation.
 // Returns "sin-fecha" if no valid month can be parsed.

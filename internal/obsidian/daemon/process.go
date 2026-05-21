@@ -1,11 +1,33 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
+
+// SyncConditionState describe el estado de la condición doble para sync.
+type SyncConditionState struct {
+	ObsidianRunning bool
+	RootSession     bool
+	Error           error
+}
+
+// Met retorna true cuando se cumple la condición doble:
+// Obsidian corriendo + sesión root activa.
+func (s SyncConditionState) Met() bool {
+	return s.Error == nil && s.ObsidianRunning && s.RootSession
+}
+
+// String retorna un resumen apto para logs.
+func (s SyncConditionState) String() string {
+	if s.Error != nil {
+		return fmt.Sprintf("obsidian=false root=false err=%v", s.Error)
+	}
+	return fmt.Sprintf("obsidian=%t root=%t", s.ObsidianRunning, s.RootSession)
+}
 
 // ProcessConfig contiene la configuración para detección de procesos.
 type ProcessConfig struct {
@@ -117,24 +139,27 @@ func RootSessionActive() bool {
 
 // ShouldSync retorna true si ambas condiciones se cumplen.
 func ShouldSync(cfg ProcessConfig) bool {
+	return ReadSyncConditionState(cfg).Met()
+}
+
+// ReadSyncConditionState evalúa la condición doble y devuelve detalle para logs.
+func ReadSyncConditionState(cfg ProcessConfig) SyncConditionState {
 	running, err := ObsidianRunning(cfg)
-	if err != nil || !running {
-		return false
+	if err != nil {
+		return SyncConditionState{Error: err}
 	}
-	return RootSessionActive()
+	if !running {
+		return SyncConditionState{ObsidianRunning: false, RootSession: false}
+	}
+	rootActive := RootSessionActive()
+	return SyncConditionState{ObsidianRunning: true, RootSession: rootActive}
 }
 
 // ShouldCleanup retorna true cuando cualquiera de las condiciones de sync falla:
 // Obsidian no está corriendo O no hay sesión root activa.
 // Es el complemento exacto de ShouldSync: cleanup = !ShouldSync.
 func ShouldCleanup(cfg ProcessConfig) bool {
-	running, err := ObsidianRunning(cfg)
-	if err != nil {
-		// Si no podemos determinar el estado, asumimos que no está corriendo
-		// para evitar dejar archivos huérfanos.
-		return true
-	}
-	return !running || !RootSessionActive()
+	return !ReadSyncConditionState(cfg).Met()
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

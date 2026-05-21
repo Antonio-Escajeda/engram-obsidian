@@ -4,7 +4,7 @@ Daemon que sincroniza las memorias de [Engram](https://github.com/Gentleman-Prog
 
 ## Concepto
 
-El vault se crea cuando Obsidian está abierto **y** hay una sesión root activa. Al cerrar cualquiera de las dos, los archivos se eliminan automáticamente. Las memorias viven en Engram — Obsidian es solo una vista temporal.
+El daemon puede preparar/crear el vault desde el bootstrap, pero **solo lo puebla** cuando Obsidian está abierto **y** hay una sesión root activa. Al cerrar cualquiera de las dos, los archivos se eliminan automáticamente. Las memorias viven en Engram — Obsidian es solo una vista temporal.
 
 ## Estructura del proyecto
 
@@ -96,7 +96,7 @@ engram-obsidian --select
 ```
 
 En la pantalla de configuración:
-- **Vault path**: se pre-rellena automáticamente con la carpeta `Documents` del usuario Windows actual (detectado via `wslvar USERPROFILE`). Podés confirmarlo o cambiarlo; también podés presionar `b` para abrir el selector de carpetas de Windows
+- **Vault path**: se pre-rellena automáticamente con la carpeta `Documents` del usuario Windows actual (detección robusta en WSL usando `wslvar`/`wslpath`, `cmd.exe`, `USERPROFILE` y fallback por `/mnt/c/Users`). Podés confirmarlo o cambiarlo; también podés presionar `b` para abrir el selector de carpetas de Windows
 - **DB path**: path a `~/.engram/engram.db`
 - **Graph mode**: `● Star` / `○ Full Mesh` — navegá con `← →` o `Space` para cambiar
 - `Tab` para navegar entre campos · `Enter` para continuar a la selección
