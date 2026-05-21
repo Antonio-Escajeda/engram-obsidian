@@ -66,6 +66,25 @@ install_pam_helper() {
     chmod 0755 "$PAM_HELPER_DST"
 }
 
+setup_pam_default() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        return 0
+    fi
+
+    echo "-> Intentando habilitar PAM automáticamente..."
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        if install_pam_helper && configure_pam; then
+            echo "   PAM wiring completado."
+        else
+            echo "   WARN: no se pudo completar PAM automáticamente."
+            echo "   Ejecutá 'sudo bash install.sh --pam' para reintentar el setup PAM."
+        fi
+    else
+        echo "   WARN: sin privilegios para escribir en /usr/local/bin y /etc/pam.d."
+        echo "   Ejecutá 'sudo bash install.sh --pam' para completar el setup PAM."
+    fi
+}
+
 if [[ "${1:-}" == "--pam" ]]; then
     install_pam_helper
     configure_pam
@@ -192,9 +211,7 @@ else
 fi
 echo "   Binario instalado en $BINARY"
 
-if [[ "$(uname -s)" == "Linux" ]]; then
-    install_pam_helper
-fi
+setup_pam_default
 
 # 5. Crear ~/.config/systemd/user/ si no existe
 echo "-> Verificando directorio systemd..."

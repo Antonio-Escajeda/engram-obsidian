@@ -67,6 +67,7 @@ cd engram-obsidian
 El script es idempotente — funciona tanto para instalación nueva como para actualización:
 - Crea `~/.local/bin/` si no existe
 - Si está en el repo local, compila con `go build`; si no, instala con `go install` remoto
+- En Linux/WSL intenta habilitar PAM automáticamente durante la instalación
 - Escribe el service file de systemd en `~/.config/systemd/user/`
 - Habilita e inicia el servicio (o lo reinicia si ya estaba activo)
 - Al terminar muestra el estado del servicio
@@ -86,7 +87,11 @@ git pull
 
 El script detecta que el servicio ya está activo y lo reinicia automáticamente.
 
-### Configuración PAM (opcional, recomendado en WSL/Linux)
+### Configuración PAM (automática por default en Linux/WSL)
+
+`install.sh` ahora intenta completar el wiring PAM en el flujo normal:
+- Si corrés con privilegios (`root`/`sudo`), instala `engram-pam-helper` y configura `/etc/pam.d/*` en el momento.
+- Si corrés sin privilegios, la instalación principal sigue sin fallar y el script te indica correr `sudo bash install.sh --pam` para terminar PAM.
 
 Para habilitar desbloqueo automático del keyring al usar `su`/`sudo`, corré:
 
@@ -94,7 +99,7 @@ Para habilitar desbloqueo automático del keyring al usar `su`/`sudo`, corré:
 sudo bash install.sh --pam
 ```
 
-Este modo:
+El modo `--pam` se mantiene para forzar/reintentar la configuración:
 - Instala `engram-pam-helper` en `/usr/local/bin/engram-pam-helper`
 - Detecta el archivo PAM del sistema (`/etc/pam.d/su` o `/etc/pam.d/su-l`)
 - Inserta hooks `pam_exec` como `optional` de forma idempotente (sin duplicar líneas)
