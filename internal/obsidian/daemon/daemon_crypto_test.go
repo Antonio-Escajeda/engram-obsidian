@@ -40,8 +40,9 @@ func makeTestSQLiteDB(t *testing.T, dbPath string) {
 	}
 }
 
-// TestResolveDBStateBothExist: when .db and .enc both exist, .enc is authoritative.
-// resolveDBState must delete .db and leave .enc intact.
+// TestResolveDBStateBothExist: when .db and .enc both exist AND the keyring is populated,
+// .enc is authoritative — resolveDBState must delete .db and leave .enc intact.
+// If the keyring is empty (ErrLocked), BOTH files must be preserved to prevent data loss.
 func TestResolveDBStateBothExist(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "engram.db")
@@ -59,12 +60,55 @@ func TestResolveDBStateBothExist(t *testing.T) {
 		t.Fatalf("resolveDBState: unexpected error: %v", err)
 	}
 
-	// .db must be gone
+	_, keyErr := crypto.LoadKey(dir)
+	if errors.Is(keyErr, crypto.ErrLocked) {
+		// Keyring empty: both files must be preserved to prevent data loss.
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			t.Error(".db should be preserved when keyring is empty but was deleted")
+		}
+		if _, err := os.Stat(encPath); err != nil {
+			t.Errorf(".enc should still exist, got: %v", err)
+		}
+		return
+	}
+
+	// Keyring populated: .enc is authoritative, .db must be removed.
 	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
 		t.Error(".db should have been deleted but still exists")
 	}
+	if _, err := os.Stat(encPath); err != nil {
+		t.Errorf(".enc should still exist, got: %v", err)
+	}
+}
 
-	// .enc must still be present
+// TestResolveDBStateBothExistLockedKeyring: when keyring is empty, resolveDBState must
+// preserve both .db and .enc rather than deleting the plaintext (EC-10 safety guard).
+func TestResolveDBStateBothExistLockedKeyring(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, keyErr := crypto.LoadKey(dir); !errors.Is(keyErr, crypto.ErrLocked) {
+		t.Skip("host keyring is populated; locked path not reproducible")
+	}
+
+	dbPath := filepath.Join(dir, "engram.db")
+	encPath := dbPath + ".enc"
+
+	if err := os.WriteFile(dbPath, []byte("plaintext"), 0600); err != nil {
+		t.Fatalf("create .db: %v", err)
+	}
+	if err := os.WriteFile(encPath, []byte("encrypted"), 0600); err != nil {
+		t.Fatalf("create .enc: %v", err)
+	}
+
+	d := newTestDaemon(t)
+	if err := d.resolveDBState(dbPath); err != nil {
+		t.Fatalf("resolveDBState: unexpected error: %v", err)
+	}
+
+	// Both files must be preserved — no data loss allowed on locked keyring.
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Error(".db was deleted despite keyring being empty — EC-10 regression")
+	}
 	if _, err := os.Stat(encPath); err != nil {
 		t.Errorf(".enc should still exist, got: %v", err)
 	}

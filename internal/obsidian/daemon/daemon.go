@@ -569,7 +569,14 @@ func (d *Daemon) resolveDBState(dbPath string) error {
 	encExists := encErr == nil
 
 	if dbExists && encExists {
-		// Ambos presentes: .enc es autoritativo. Borrar plaintext y WAL files.
+		// .enc is authoritative ONLY if we can decrypt it (keyring must be populated).
+		// If keyring is empty, do NOT delete the plaintext — leave both files and let
+		// decryptDB fail gracefully (LOCKED no-op). This prevents data loss on WSL restart.
+		_, keyErr := crypto.LoadKey(filepath.Dir(dbPath))
+		if errors.Is(keyErr, crypto.ErrLocked) {
+			d.cfg.Logf("WARN resolveDBState: both .db and .db.enc exist but keyring is empty — keeping plaintext until keyring is populated")
+			return nil
+		}
 		d.cfg.Logf("WARN resolveDBState: both .db and .db.enc exist — .enc is authoritative, removing plaintext")
 		if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("resolveDBState: remove plaintext db: %w", err)

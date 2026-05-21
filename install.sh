@@ -2,6 +2,7 @@
 set -euo pipefail
 
 BINARY="$HOME/.local/bin/engram-obsidian"
+PAM_BINARY="$HOME/.local/bin/engram-pam-helper"
 SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/engram-obsidian.service"
 PAM_HELPER_SRC="./cmd/engram-pam-helper"
@@ -59,11 +60,14 @@ install_pam_helper() {
         return 0
     fi
     if [[ -f "$PAM_HELPER_SRC/main.go" ]]; then
-        go build -o "$PAM_HELPER_DST" "$PAM_HELPER_SRC"
+        go build -o "$PAM_BINARY" "$PAM_HELPER_SRC"
+        chmod 0755 "$PAM_BINARY"
+        sudo cp "$PAM_BINARY" "$PAM_HELPER_DST"
     else
         GOTOOLCHAIN=local GONOSUMCHECK=* GOPROXY=direct GOBIN="/usr/local/bin" go install -buildvcs=false github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-pam-helper@main
+        sudo cp "/usr/local/bin/engram-pam-helper" "$PAM_BINARY" 2>/dev/null || true
     fi
-    chmod 0755 "$PAM_HELPER_DST"
+    sudo chmod 0755 "$PAM_HELPER_DST"
 }
 
 setup_pam_default() {
@@ -85,7 +89,14 @@ setup_pam_default() {
     fi
 }
 
-if [[ "${1:-}" == "--pam" ]]; then
+CONFIGURE_PAM=false
+for arg in "$@"; do
+    case "$arg" in
+        --pam) CONFIGURE_PAM=true ;;
+    esac
+done
+
+if [[ "$CONFIGURE_PAM" == true ]]; then
     install_pam_helper
     configure_pam
     echo "PAM setup completado."
@@ -211,6 +222,14 @@ else
 fi
 echo "   Binario instalado en $BINARY"
 
+# 4b. Build and install PAM helper (user-space copy)
+if [[ -f "$PAM_HELPER_SRC/main.go" ]]; then
+    echo "-> Instalando PAM helper en $PAM_BINARY ..."
+    go build -o "$PAM_BINARY" ./cmd/engram-pam-helper/
+    chmod 0755 "$PAM_BINARY"
+    echo "   PAM helper instalado: $PAM_BINARY"
+fi
+
 setup_pam_default
 
 # 5. Crear ~/.config/systemd/user/ si no existe
@@ -285,3 +304,8 @@ if [[ "${GO_INSTALLED:-false}" == true ]]; then
     echo "IMPORTANTE: Go fue instalado. Para usarlo en esta terminal corré:"
     echo "  source $RC_FILE"
 fi
+
+echo ""
+echo "-> Pasos opcionales:"
+echo "   Corré 'engram-obsidian setup-keys' para inicializar el cifrado."
+echo "   Corré 'sudo bash install.sh --pam' para configurar el auto-unlock PAM."
