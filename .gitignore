@@ -1,1 +1,9 @@
 /engram-obsidian
+
+# Notas y artefactos locales
+.atl/
+ENCRYPTION_DECRYPTION_ROOT_SESSION_FLOW.md
+MASTER_KEY_SETUP_PAM_FLOW.md
+PAM_KEY_MANAGEMENT.md
+PAM_KEY_MANAGEMENT_STATUS.md
+claude.txt
