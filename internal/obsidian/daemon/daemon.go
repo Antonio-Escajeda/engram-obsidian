@@ -71,22 +71,37 @@ func (d *Daemon) RunOnce() error {
 
 	dbPath, restoreDBState := d.prepareSelectionDB(sel)
 	defer restoreDBState()
+	if _, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("select cycle: db path does not exist: %s", dbPath)
+		}
+		return fmt.Errorf("select cycle: stat db path %s: %w", dbPath, err)
+	}
 
 	var observations []store.Observation
+	var dbProjects []string
 	if dbPath != "" {
 		if reader, err := store.Open(dbPath); err != nil {
-			d.cfg.Logf("WARN open db: %v", err)
+			return fmt.Errorf("select cycle: open db %s: %w", dbPath, err)
 		} else {
-			if data, err := reader.Export(); err != nil {
-				d.cfg.Logf("WARN export db: %v", err)
-			} else {
-				observations = data.Observations
+			data, err := reader.Export()
+			if err != nil {
+				reader.Close()
+				return fmt.Errorf("select cycle: export db %s: %w", dbPath, err)
 			}
+			observations = data.Observations
+
+			projects, err := reader.ListProjects()
+			if err != nil {
+				reader.Close()
+				return fmt.Errorf("select cycle: list projects db %s: %w", dbPath, err)
+			}
+			dbProjects = projects
 			reader.Close()
 		}
 	}
 
-	model := tui.New(sel, observations)
+	model := tui.New(sel, observations, dbProjects)
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := prog.Run()
 	if err != nil {
@@ -425,6 +440,7 @@ func (d *Daemon) runCycle() (bool, error) {
 	}
 
 	var observations []store.Observation
+	var dbProjects []string
 	if dbPath != "" {
 		if reader, err := store.Open(dbPath); err != nil {
 			d.cfg.Logf("WARN open db: %v", err)
@@ -434,12 +450,17 @@ func (d *Daemon) runCycle() (bool, error) {
 			} else {
 				observations = data.Observations
 			}
+			if projects, err := reader.ListProjects(); err != nil {
+				d.cfg.Logf("WARN list projects: %v", err)
+			} else {
+				dbProjects = projects
+			}
 			reader.Close()
 		}
 	}
 
 	// Lanzar TUI
-	model := tui.New(sel, observations)
+	model := tui.New(sel, observations, dbProjects)
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := prog.Run()
 	if err != nil {
@@ -709,8 +730,7 @@ func (d *Daemon) encryptDB(dbPath string) error {
 }
 
 func defaultDBPath() string {
-	home, _ := os.UserHomeDir()
-	return home + "/.engram/engram.db"
+	return filepath.Join(engramDataDir(), "engram.db")
 }
 
 func defaultVaultPath() string {
@@ -722,11 +742,65 @@ func defaultVaultPath() string {
 }
 
 func expandHomePath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			return filepath.Join(home, path[2:])
-		}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
 	}
-	return path
+
+	if filepath.IsAbs(path) {
+		return path
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+
+	if path == "~" {
+		return home
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(home, path[2:])
+	}
+
+	dataDir := engramDataDir()
+	if strings.HasPrefix(path, "./") {
+		path = strings.TrimPrefix(path, "./")
+	}
+	return filepath.Join(dataDir, path)
+}
+
+func engramDataDir() string {
+	base := strings.TrimSpace(os.Getenv("ENGRAM_DATA_DIR"))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+
+	if base == "" {
+		if home == "" {
+			return ".engram"
+		}
+		return filepath.Join(home, ".engram")
+	}
+
+	if base == "~" {
+		if home != "" {
+			return home
+		}
+		return base
+	}
+	if strings.HasPrefix(base, "~/") {
+		if home != "" {
+			return filepath.Join(home, base[2:])
+		}
+		return base
+	}
+	if filepath.IsAbs(base) {
+		return base
+	}
+	if home != "" {
+		return filepath.Join(home, base)
+	}
+	return base
 }

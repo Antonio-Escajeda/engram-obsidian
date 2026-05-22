@@ -1,12 +1,15 @@
 package store_test
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Antonio-Escajeda/engram-obsidian/internal/store"
+	_ "modernc.org/sqlite"
 )
 
 func TestOpenReturnsErrorWhenEncryptedAndNoDB(t *testing.T) {
@@ -63,5 +66,63 @@ func TestOpenNoEncGuardWhenBothExist(t *testing.T) {
 	_, err := store.Open(dbPath)
 	if err != nil && strings.Contains(err.Error(), "encrypted") {
 		t.Errorf("enc guard should not trigger when .db exists; got: %q", err.Error())
+	}
+}
+
+func TestListProjectsReturnsDistinctSortedUnion(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "engram.db")
+
+	db, err := sql.Open("sqlite", "file:"+dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+		CREATE TABLE observations (
+			id INTEGER PRIMARY KEY,
+			project TEXT,
+			deleted_at TEXT
+		);
+		CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			project TEXT
+		);
+	`)
+	if err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+
+	_, err = db.Exec(`
+		INSERT INTO observations(id, project, deleted_at) VALUES
+			(1, 'beta', NULL),
+			(2, 'alpha', NULL),
+			(3, 'deleted', '2026-01-01'),
+			(4, '', NULL);
+		INSERT INTO sessions(id, project) VALUES
+			('s1', 'gamma'),
+			('s2', 'beta'),
+			('s3', '');
+	`)
+	if err != nil {
+		t.Fatalf("seed data: %v", err)
+	}
+	db.Close()
+
+	r, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store open: %v", err)
+	}
+	defer r.Close()
+
+	projects, err := r.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+
+	want := []string{"alpha", "beta", "gamma"}
+	if !reflect.DeepEqual(projects, want) {
+		t.Fatalf("unexpected projects list: got %v want %v", projects, want)
 	}
 }

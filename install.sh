@@ -244,6 +244,7 @@ Description=Engram -> Obsidian Memory Sync
 After=default.target
 
 [Service]
+Environment=ENGRAM_DATA_DIR=%h/.engram
 ExecStart=%h/.local/bin/engram-obsidian --daemon --interval 10m
 Restart=on-failure
 RestartSec=10s

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -69,6 +70,40 @@ func (r *Reader) Export() (*ExportData, error) {
 		Sessions:     sessions,
 		Observations: observations,
 	}, nil
+}
+
+// ListProjects returns distinct project names present in memory.
+// Sources: observations.project (active rows) and sessions.project.
+func (r *Reader) ListProjects() ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT DISTINCT project FROM (
+			SELECT TRIM(project) AS project
+			FROM observations
+			WHERE deleted_at IS NULL
+			UNION
+			SELECT TRIM(project) AS project
+			FROM sessions
+		)
+		WHERE project IS NOT NULL AND project <> ''
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		projects = append(projects, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Strings(projects)
+	return projects, nil
 }
 
 func (r *Reader) querySessions() ([]Session, error) {

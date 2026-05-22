@@ -76,6 +76,7 @@ El script es idempotente — funciona tanto para instalación nueva como para ac
 - Si está en el repo local, compila con `go build`; si no, instala con `go install` remoto
 - En Linux/WSL intenta habilitar PAM automáticamente durante la instalación
 - Escribe el service file de systemd en `~/.config/systemd/user/`
+- Fija `ENGRAM_DATA_DIR=%h/.engram` en el servicio para resolución portable de `db_path`
 - Habilita e inicia el servicio (o lo reinicia si ya estaba activo)
 - Al terminar muestra el estado del servicio
 
@@ -130,7 +131,7 @@ engram-obsidian --select
 
 En la pantalla de configuración:
 - **Vault path**: se pre-rellena automáticamente con la carpeta `Documents` del usuario Windows actual (detección robusta en WSL usando `wslvar`/`wslpath`, `cmd.exe`, `USERPROFILE` y fallback por `/mnt/c/Users`). Podés confirmarlo o cambiarlo; también podés presionar `b` para abrir el selector de carpetas de Windows
-- **DB path**: path a `~/.engram/engram.db`
+- **DB path**: default `~/.engram/engram.db`. Se aceptan rutas absolutas (se mantienen tal cual) y también rutas relativas/`./...` que se resuelven dentro de `ENGRAM_DATA_DIR` (por default `~/.engram`)
 - **Graph mode**: `● Star` / `○ Full Mesh` — navegá con `← →` o `Space` para cambiar
 - `Tab` para navegar entre campos · `Enter` para continuar a la selección
 
@@ -141,6 +142,11 @@ En la pantalla de configuración:
 La TUI muestra un árbol `Proyecto → Mes → Nota`. Usá `Space` para activar/desactivar, `s` para confirmar y sincronizar.
 
 La selección se guarda en `~/.engram/obsidian-selection.json` y el daemon la usa en cada ciclo.
+
+Compatibilidad de `db_path`:
+- Si `db_path` está en absoluto (`/mnt/c/...`, `/home/...`) no se modifica.
+- Si `db_path` viene en legacy absoluto bajo `$HOME`, `install.sh` lo migra a notación `~/...` para que sea portable entre usuarios/máquinas.
+- Si `db_path` es relativo, el daemon lo resuelve contra `ENGRAM_DATA_DIR` (o `~/.engram` si no está definido).
 
 ### Graph Mode
 
