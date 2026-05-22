@@ -333,7 +333,7 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 		// Determinar si es create o update.
 		// wasKnown=true → ya estaba en state → es un update.
 		// wasKnown=false → primera vez → es un create.
-		_, wasKnown := state.Files[obs.ID]
+		oldPath, wasKnown := state.Files[obs.ID]
 
 		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("mkdir for obs %d: %w", obs.ID, err))
@@ -356,6 +356,13 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 			continue
 		}
 
+		if wasKnown && oldPath != relPath {
+			oldAbsPath := filepath.Join(e.vaultPath, oldPath+".md")
+			if err := os.Remove(oldAbsPath); err != nil && !os.IsNotExist(err) {
+				e.logf("WARN delete renamed obs %d (%s): %v", obs.ID, oldPath, err)
+			}
+		}
+
 		state.Files[obs.ID] = relPath
 
 		// Acumular mes activo para cleanup posterior de índices de mes/año huérfanos.
@@ -370,7 +377,7 @@ func (e *Exporter) Export(data *store.ExportData, filter func(store.Observation)
 
 		written[obs.ID] = ObsRef{
 			Slug:      filepath.Base(relPath),
-			Title:     obs.Title,
+			Title:     CanonicalExportTitle(obs),
 			TopicKey:  obs.TopicKeyStr(),
 			Type:      obs.Type,
 			Project:   obs.ProjectName(),
@@ -616,7 +623,7 @@ func (e *Exporter) writeIndexes(obs []store.Observation, filter func(store.Obser
 					filepath.Join(engramRoot, proj, year, year), year)
 				for _, o := range mObs {
 					obsRelPath := ObservationPath(engramRoot, o)
-					fmt.Fprintf(&monthSb, "- [[%s|%s]] — %s\n", obsRelPath, o.Title, sanitize(o.Type))
+					fmt.Fprintf(&monthSb, "- [[%s|%s]] — %s\n", obsRelPath, CanonicalExportTitle(o), sanitize(o.Type))
 				}
 				monthFile := filepath.Join(monthDir, month+".md")
 				_ = os.WriteFile(monthFile, []byte(monthSb.String()), 0644)
@@ -632,7 +639,7 @@ func (e *Exporter) writeIndexes(obs []store.Observation, filter func(store.Obser
 			fmt.Fprintf(&hubSb, "## Memorias (%d)\n\n", len(typeObs))
 			for _, o := range typeObs {
 				obsRelPath := ObservationPath(engramRoot, o)
-				fmt.Fprintf(&hubSb, "- [[%s|%s]]\n", obsRelPath, o.Title)
+				fmt.Fprintf(&hubSb, "- [[%s|%s]]\n", obsRelPath, CanonicalExportTitle(o))
 			}
 			hubFile := filepath.Join(projDir, "📋 "+obsType+".md")
 			_ = os.WriteFile(hubFile, []byte(hubSb.String()), 0644)

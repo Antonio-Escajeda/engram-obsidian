@@ -17,7 +17,7 @@ var monthNames = []string{
 func ObservationPath(engramRoot string, obs store.Observation) string {
 	project := sanitize(obs.ProjectName())
 	obsType := sanitize(obs.Type)
-	slug := Slugify(obs.Title, obs.ID)
+	slug := Slugify(CanonicalExportTitle(obs), obs.ID)
 	year := obs.CreatedYear()
 	month := ""
 	if len(obs.CreatedAt) >= 7 {
@@ -69,7 +69,7 @@ func ObservationToMarkdown(obs store.Observation, relPath string, engramRoot str
 		updated = obs.UpdatedAt[:10]
 	}
 
-	title := obs.Title
+	title := CanonicalExportTitle(obs)
 	safeTitle := strings.ReplaceAll(title, `"`, `'`)
 
 	_ = month // usado solo para monthDir
@@ -115,7 +115,7 @@ func ObservationToMarkdown(obs store.Observation, relPath string, engramRoot str
 		fmt.Fprintf(&sb, "\n---\n\n## Relacionadas (%s)\n\n", obsType)
 		for _, peer := range peers {
 			peerPath := ObservationPath(engramRoot, peer)
-			fmt.Fprintf(&sb, "- [[%s|%s]]\n", peerPath, peer.Title)
+			fmt.Fprintf(&sb, "- [[%s|%s]]\n", peerPath, CanonicalExportTitle(peer))
 		}
 	}
 
