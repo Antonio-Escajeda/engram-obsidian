@@ -154,7 +154,7 @@ Controla cómo se generan los links entre notas para el Obsidian graph view.
 
 | Modo | Comportamiento |
 |---|---|
-| **Star** (default) | Cada tipo tiene un archivo hub (`📋 bugfix.md`, `📋 architecture.md`, etc.). Todas las notas del mismo tipo apuntan al hub → topología estrella por color. |
+| **Star** (default) | Cada tipo tiene un archivo hub (`📋 bugfix.md`, `📋 architecture.md`, `📋 database.md`, etc.). Todas las notas del mismo tipo apuntan al hub → topología estrella por color. |
 | **Full Mesh** | Además de los hubs, cada nota linkea directamente a todas las demás del mismo tipo en el mismo proyecto → clique completo por color. |
 
 Se configura en la pantalla de configuración (`--select`) con el campo **Graph mode**.
@@ -218,8 +218,14 @@ Cada nota linkea solo a su mes. El mes linkea al año, el año al proyecto — j
 | `pattern` | naranja |
 | `discovery` | violeta |
 | `config` | amarillo |
+| `database` | cyan |
 | `preference` | rosa |
 | `session_summary` | teal |
+
+### Regla de uso recomendada para cambios de base de datos
+
+- Usá `type: database` para migraciones, cambios de esquema, índices, tuning SQL o decisiones de modelado de datos.
+- Para mantener consistencia de lectura en Obsidian, titulá notas con el formato: `YYYY-MM-DD [database] - descripción corta`.
 
 ## Logs
 
