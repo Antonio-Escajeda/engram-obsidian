@@ -37,8 +37,8 @@ type TreeNode struct {
 	Expanded bool
 }
 
-// BuildTree construye el árbol desde observaciones y la selección actual.
-func BuildTree(observations []store.Observation, sel *obsidian.Selection) []*TreeNode {
+// BuildTree construye el árbol desde observaciones, proyectos de DB y selección actual.
+func BuildTree(observations []store.Observation, sel *obsidian.Selection, dbProjects []string) []*TreeNode {
 	// Agrupar: project → month → []obs
 	byProjectMonth := map[string]map[string][]store.Observation{}
 
@@ -57,8 +57,24 @@ func BuildTree(observations []store.Observation, sel *obsidian.Selection) []*Tre
 		byProjectMonth[p][m] = append(byProjectMonth[p][m], obs)
 	}
 
-	projects := make([]string, 0, len(byProjectMonth))
+	projectSet := make(map[string]struct{}, len(byProjectMonth)+len(dbProjects)+len(sel.Selected))
+	projects := make([]string, 0, len(byProjectMonth)+len(dbProjects)+len(sel.Selected))
 	for p := range byProjectMonth {
+		projectSet[p] = struct{}{}
+	}
+	for _, p := range dbProjects {
+		if p == "" {
+			continue
+		}
+		projectSet[p] = struct{}{}
+	}
+	for p := range sel.Selected {
+		if p == "" {
+			continue
+		}
+		projectSet[p] = struct{}{}
+	}
+	for p := range projectSet {
 		projects = append(projects, p)
 	}
 	sort.Strings(projects)
@@ -66,6 +82,9 @@ func BuildTree(observations []store.Observation, sel *obsidian.Selection) []*Tre
 	var roots []*TreeNode
 	for _, proj := range projects {
 		months := byProjectMonth[proj]
+		if months == nil {
+			months = map[string][]store.Observation{}
+		}
 		monthKeys := make([]string, 0, len(months))
 		for m := range months {
 			monthKeys = append(monthKeys, m)
@@ -188,6 +207,12 @@ func ToSelection(nodes []*TreeNode, current *obsidian.Selection) *obsidian.Selec
 		Selected: make(map[string]obsidian.ProjectSelection),
 	}
 	for _, proj := range nodes {
+		if len(proj.Children) == 0 && proj.Check == CheckNone {
+			if original, ok := current.Selected[proj.Key]; ok {
+				out.Selected[proj.Key] = original
+			}
+			continue
+		}
 		switch proj.Check {
 		case CheckNone:
 			continue

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -45,7 +46,8 @@ func DefaultConfig() Config {
 
 // Daemon orquesta el ciclo completo: detección → TUI → sync → cleanup.
 type Daemon struct {
-	cfg Config
+	cfg            Config
+	lockedLoggedAt time.Time
 }
 
 // New crea un Daemon con la configuración dada.
@@ -69,22 +71,37 @@ func (d *Daemon) RunOnce() error {
 
 	dbPath, restoreDBState := d.prepareSelectionDB(sel)
 	defer restoreDBState()
+	if _, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("select cycle: db path does not exist: %s", dbPath)
+		}
+		return fmt.Errorf("select cycle: stat db path %s: %w", dbPath, err)
+	}
 
 	var observations []store.Observation
+	var dbProjects []string
 	if dbPath != "" {
 		if reader, err := store.Open(dbPath); err != nil {
-			d.cfg.Logf("WARN open db: %v", err)
+			return fmt.Errorf("select cycle: open db %s: %w", dbPath, err)
 		} else {
-			if data, err := reader.Export(); err != nil {
-				d.cfg.Logf("WARN export db: %v", err)
-			} else {
-				observations = data.Observations
+			data, err := reader.Export()
+			if err != nil {
+				reader.Close()
+				return fmt.Errorf("select cycle: export db %s: %w", dbPath, err)
 			}
+			observations = data.Observations
+
+			projects, err := reader.ListProjects()
+			if err != nil {
+				reader.Close()
+				return fmt.Errorf("select cycle: list projects db %s: %w", dbPath, err)
+			}
+			dbProjects = projects
 			reader.Close()
 		}
 	}
 
-	model := tui.New(sel, observations)
+	model := tui.New(sel, observations, dbProjects)
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := prog.Run()
 	if err != nil {
@@ -247,6 +264,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.cfg.Logf("Conditions not met — standby")
 	}
 
+	// LOCKED standby: when LoadKey returns ErrLocked, encrypt/decryptDB are no-ops.
+	// The daemon continues polling. On next tick after su/sudo populates the keyring,
+	// LoadKey succeeds and normal operation resumes.
 	ticker := time.NewTicker(d.cfg.PollInterval)
 	defer ticker.Stop()
 
@@ -420,6 +440,7 @@ func (d *Daemon) runCycle() (bool, error) {
 	}
 
 	var observations []store.Observation
+	var dbProjects []string
 	if dbPath != "" {
 		if reader, err := store.Open(dbPath); err != nil {
 			d.cfg.Logf("WARN open db: %v", err)
@@ -429,12 +450,17 @@ func (d *Daemon) runCycle() (bool, error) {
 			} else {
 				observations = data.Observations
 			}
+			if projects, err := reader.ListProjects(); err != nil {
+				d.cfg.Logf("WARN list projects: %v", err)
+			} else {
+				dbProjects = projects
+			}
 			reader.Close()
 		}
 	}
 
 	// Lanzar TUI
-	model := tui.New(sel, observations)
+	model := tui.New(sel, observations, dbProjects)
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := prog.Run()
 	if err != nil {
@@ -564,7 +590,14 @@ func (d *Daemon) resolveDBState(dbPath string) error {
 	encExists := encErr == nil
 
 	if dbExists && encExists {
-		// Ambos presentes: .enc es autoritativo. Borrar plaintext y WAL files.
+		// .enc is authoritative ONLY if we can decrypt it (keyring must be populated).
+		// If keyring is empty, do NOT delete the plaintext — leave both files and let
+		// decryptDB fail gracefully (LOCKED no-op). This prevents data loss on WSL restart.
+		_, keyErr := crypto.LoadKey(filepath.Dir(dbPath))
+		if errors.Is(keyErr, crypto.ErrLocked) {
+			d.cfg.Logf("WARN resolveDBState: both .db and .db.enc exist but keyring is empty — keeping plaintext until keyring is populated")
+			return nil
+		}
 		d.cfg.Logf("WARN resolveDBState: both .db and .db.enc exist — .enc is authoritative, removing plaintext")
 		if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("resolveDBState: remove plaintext db: %w", err)
@@ -588,8 +621,15 @@ func (d *Daemon) decryptDB(dbPath string) error {
 		return nil
 	}
 
-	key, err := crypto.GetOrCreateKey(dbDir)
+	key, err := crypto.LoadKey(dbDir)
 	if err != nil {
+		if errors.Is(err, crypto.ErrLocked) {
+			if time.Since(d.lockedLoggedAt) > time.Minute {
+				d.cfg.Logf("LOCKED — waiting for keyring (run su/sudo or engram-obsidian unlock)")
+				d.lockedLoggedAt = time.Now()
+			}
+			return nil
+		}
 		return fmt.Errorf("decryptDB: get key: %w", err)
 	}
 
@@ -648,8 +688,15 @@ func (d *Daemon) encryptDB(dbPath string) error {
 	}
 	db.Close()
 
-	key, err := crypto.GetOrCreateKey(dbDir)
+	key, err := crypto.LoadKey(dbDir)
 	if err != nil {
+		if errors.Is(err, crypto.ErrLocked) {
+			if time.Since(d.lockedLoggedAt) > time.Minute {
+				d.cfg.Logf("LOCKED — waiting for keyring (run su/sudo or engram-obsidian unlock)")
+				d.lockedLoggedAt = time.Now()
+			}
+			return nil
+		}
 		return fmt.Errorf("encryptDB: get key: %w", err)
 	}
 
@@ -683,8 +730,7 @@ func (d *Daemon) encryptDB(dbPath string) error {
 }
 
 func defaultDBPath() string {
-	home, _ := os.UserHomeDir()
-	return home + "/.engram/engram.db"
+	return filepath.Join(engramDataDir(), "engram.db")
 }
 
 func defaultVaultPath() string {
@@ -696,11 +742,65 @@ func defaultVaultPath() string {
 }
 
 func expandHomePath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			return filepath.Join(home, path[2:])
-		}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
 	}
-	return path
+
+	if filepath.IsAbs(path) {
+		return path
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+
+	if path == "~" {
+		return home
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(home, path[2:])
+	}
+
+	dataDir := engramDataDir()
+	if strings.HasPrefix(path, "./") {
+		path = strings.TrimPrefix(path, "./")
+	}
+	return filepath.Join(dataDir, path)
+}
+
+func engramDataDir() string {
+	base := strings.TrimSpace(os.Getenv("ENGRAM_DATA_DIR"))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+
+	if base == "" {
+		if home == "" {
+			return ".engram"
+		}
+		return filepath.Join(home, ".engram")
+	}
+
+	if base == "~" {
+		if home != "" {
+			return home
+		}
+		return base
+	}
+	if strings.HasPrefix(base, "~/") {
+		if home != "" {
+			return filepath.Join(home, base[2:])
+		}
+		return base
+	}
+	if filepath.IsAbs(base) {
+		return base
+	}
+	if home != "" {
+		return filepath.Join(home, base)
+	}
+	return base
 }

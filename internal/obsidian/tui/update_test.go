@@ -8,7 +8,7 @@ import (
 
 func TestConfigConfirmForcesVaultLockDisabled(t *testing.T) {
 	sel := &obsidian.Selection{Version: 1, Selected: map[string]obsidian.ProjectSelection{}}
-	m := New(sel, nil)
+	m := New(sel, nil, nil)
 	m.ConfigFocus = 4
 	m.VaultLock = "strict"
 	m.VaultInput.SetValue("/mnt/c/Users/test/Vault")

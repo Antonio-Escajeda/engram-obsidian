@@ -43,8 +43,8 @@ type Model struct {
 	StatusMsg    string
 }
 
-// New crea un Model inicializado con la selección y observaciones dadas.
-func New(sel *obsidian.Selection, observations []store.Observation) Model {
+// New creates a Model initialized with selection, observations and DB project list.
+func New(sel *obsidian.Selection, observations []store.Observation, dbProjects []string) Model {
 	vaultInput := textinput.New()
 	vaultInput.Placeholder = "~/Obsidian/engram"
 	vaultInput.CharLimit = 256
@@ -80,7 +80,7 @@ func New(sel *obsidian.Selection, observations []store.Observation) Model {
 		vaultInput.Focus()
 	}
 
-	roots := BuildTree(observations, sel)
+	roots := BuildTree(observations, sel, dbProjects)
 	flat := FlatNodes(roots)
 
 	return Model{

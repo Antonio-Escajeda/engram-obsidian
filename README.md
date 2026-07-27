@@ -56,6 +56,13 @@ engram-obsidian/
 curl -fsSL https://raw.githubusercontent.com/Antonio-Escajeda/engram-obsidian/main/install.sh | bash
 ```
 
+> Este comando instala/actualiza el daemon en modo usuario sin requerir `sudo`.
+> Para completar la integración PAM del sistema, ejecuta luego:
+>
+> ```bash
+> sudo bash install.sh --pam
+> ```
+
 ### Desde el repo local
 
 ```bash
@@ -67,7 +74,9 @@ cd engram-obsidian
 El script es idempotente — funciona tanto para instalación nueva como para actualización:
 - Crea `~/.local/bin/` si no existe
 - Si está en el repo local, compila con `go build`; si no, instala con `go install` remoto
+- En Linux/WSL intenta habilitar PAM automáticamente durante la instalación
 - Escribe el service file de systemd en `~/.config/systemd/user/`
+- Fija `ENGRAM_DATA_DIR=%h/.engram` en el servicio para resolución portable de `db_path`
 - Habilita e inicia el servicio (o lo reinicia si ya estaba activo)
 - Al terminar muestra el estado del servicio
 
@@ -86,6 +95,25 @@ git pull
 
 El script detecta que el servicio ya está activo y lo reinicia automáticamente.
 
+### Configuración PAM (automática por default en Linux/WSL)
+
+`install.sh` ahora intenta completar el wiring PAM en el flujo normal:
+- Si corrés con privilegios (`root`/`sudo`), instala `engram-pam-helper` y configura `/etc/pam.d/*` en el momento.
+- Si corrés sin privilegios, la instalación principal sigue sin fallar y el script te indica correr `sudo bash install.sh --pam` para terminar PAM.
+
+Para habilitar desbloqueo automático del keyring al usar `su`/`sudo`, corré:
+
+```bash
+sudo bash install.sh --pam
+```
+
+El modo `--pam` se mantiene para forzar/reintentar la configuración:
+- Instala `engram-pam-helper` en `/usr/local/bin/engram-pam-helper`
+- Detecta el archivo PAM del sistema (`/etc/pam.d/su` o `/etc/pam.d/su-l`)
+- Inserta hooks `pam_exec` como `optional` de forma idempotente (sin duplicar líneas)
+
+> Si corrés `install.sh` sin privilegios, el script continúa la instalación normal y te indica ejecutar `sudo bash install.sh --pam` para completar el wiring PAM.
+
 ## Uso
 
 | Comando | Comportamiento |
@@ -103,7 +131,7 @@ engram-obsidian --select
 
 En la pantalla de configuración:
 - **Vault path**: se pre-rellena automáticamente con la carpeta `Documents` del usuario Windows actual (detección robusta en WSL usando `wslvar`/`wslpath`, `cmd.exe`, `USERPROFILE` y fallback por `/mnt/c/Users`). Podés confirmarlo o cambiarlo; también podés presionar `b` para abrir el selector de carpetas de Windows
-- **DB path**: path a `~/.engram/engram.db`
+- **DB path**: default `~/.engram/engram.db`. Se aceptan rutas absolutas (se mantienen tal cual) y también rutas relativas/`./...` que se resuelven dentro de `ENGRAM_DATA_DIR` (por default `~/.engram`)
 - **Graph mode**: `● Star` / `○ Full Mesh` — navegá con `← →` o `Space` para cambiar
 - `Tab` para navegar entre campos · `Enter` para continuar a la selección
 
@@ -115,13 +143,18 @@ La TUI muestra un árbol `Proyecto → Mes → Nota`. Usá `Space` para activar/
 
 La selección se guarda en `~/.engram/obsidian-selection.json` y el daemon la usa en cada ciclo.
 
+Compatibilidad de `db_path`:
+- Si `db_path` está en absoluto (`/mnt/c/...`, `/home/...`) no se modifica.
+- Si `db_path` viene en legacy absoluto bajo `$HOME`, `install.sh` lo migra a notación `~/...` para que sea portable entre usuarios/máquinas.
+- Si `db_path` es relativo, el daemon lo resuelve contra `ENGRAM_DATA_DIR` (o `~/.engram` si no está definido).
+
 ### Graph Mode
 
 Controla cómo se generan los links entre notas para el Obsidian graph view.
 
 | Modo | Comportamiento |
 |---|---|
-| **Star** (default) | Cada tipo tiene un archivo hub (`📋 bugfix.md`, `📋 architecture.md`, etc.). Todas las notas del mismo tipo apuntan al hub → topología estrella por color. |
+| **Star** (default) | Cada tipo tiene un archivo hub (`📋 bugfix.md`, `📋 architecture.md`, `📋 database.md`, etc.). Todas las notas del mismo tipo apuntan al hub → topología estrella por color. |
 | **Full Mesh** | Además de los hubs, cada nota linkea directamente a todas las demás del mismo tipo en el mismo proyecto → clique completo por color. |
 
 Se configura en la pantalla de configuración (`--select`) con el campo **Graph mode**.
@@ -185,8 +218,14 @@ Cada nota linkea solo a su mes. El mes linkea al año, el año al proyecto — j
 | `pattern` | naranja |
 | `discovery` | violeta |
 | `config` | amarillo |
+| `database` | cyan |
 | `preference` | rosa |
 | `session_summary` | teal |
+
+### Regla de uso recomendada para cambios de base de datos
+
+- Usá `type: database` para migraciones, cambios de esquema, índices, tuning SQL o decisiones de modelado de datos.
+- Para mantener consistencia de lectura en Obsidian, titulá notas con el formato: `YYYY-MM-DD [database] - descripción corta`.
 
 ## Logs
 

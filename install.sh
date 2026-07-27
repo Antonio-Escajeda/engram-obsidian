@@ -2,8 +2,106 @@
 set -euo pipefail
 
 BINARY="$HOME/.local/bin/engram-obsidian"
+PAM_BINARY="$HOME/.local/bin/engram-pam-helper"
 SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/engram-obsidian.service"
+PAM_HELPER_SRC="./cmd/engram-pam-helper"
+PAM_HELPER_DST="/usr/local/bin/engram-pam-helper"
+PAM_SESSION_LINE="session  optional  pam_exec.so expose_authtok /usr/local/bin/engram-pam-helper session"
+PAM_PASSWORD_LINE="password optional  pam_exec.so expose_authtok /usr/local/bin/engram-pam-helper password"
+
+configure_pam() {
+    local pam_target tmp_file backup_file
+
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        echo "-> PAM config skipped: non-Linux system"
+        return 0
+    fi
+
+    if [[ -f "/etc/pam.d/su" ]]; then
+        pam_target="/etc/pam.d/su"
+    elif [[ -f "/etc/pam.d/su-l" ]]; then
+        pam_target="/etc/pam.d/su-l"
+    else
+        echo "ERROR: no supported PAM target found (/etc/pam.d/su or /etc/pam.d/su-l)"
+        return 1
+    fi
+
+    echo "-> Configurando PAM en $pam_target"
+    backup_file="${pam_target}.engram-obsidian.bak"
+    cp "$pam_target" "$backup_file"
+    echo "   Backup creado en $backup_file"
+
+    tmp_file=$(mktemp)
+    cp "$pam_target" "$tmp_file"
+
+    if ! grep -qF "$PAM_SESSION_LINE" "$tmp_file"; then
+        printf '\n%s\n' "$PAM_SESSION_LINE" >> "$tmp_file"
+    fi
+
+    if ! grep -qF "$PAM_PASSWORD_LINE" "$tmp_file"; then
+        printf '%s\n' "$PAM_PASSWORD_LINE" >> "$tmp_file"
+    fi
+
+    install -m 0644 "$tmp_file" "$pam_target"
+    rm -f "$tmp_file"
+    echo "   PAM hooks optionales instalados (idempotente)"
+}
+
+install_pam_helper() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        echo "-> PAM helper skipped: non-Linux system"
+        return 0
+    fi
+
+    echo "-> Instalando engram-pam-helper en $PAM_HELPER_DST"
+    if [[ ! -w "/usr/local/bin" && "${EUID:-$(id -u)}" -ne 0 ]]; then
+        echo "   WARN: sin permisos para /usr/local/bin. Ejecutá 'sudo bash install.sh --pam' para completar PAM."
+        return 0
+    fi
+    if [[ -f "$PAM_HELPER_SRC/main.go" ]]; then
+        go build -o "$PAM_BINARY" "$PAM_HELPER_SRC"
+        chmod 0755 "$PAM_BINARY"
+        sudo cp "$PAM_BINARY" "$PAM_HELPER_DST"
+    else
+        GOTOOLCHAIN=local GONOSUMCHECK=* GOPROXY=direct GOBIN="/usr/local/bin" go install -buildvcs=false github.com/Antonio-Escajeda/engram-obsidian/cmd/engram-pam-helper@main
+        sudo cp "/usr/local/bin/engram-pam-helper" "$PAM_BINARY" 2>/dev/null || true
+    fi
+    sudo chmod 0755 "$PAM_HELPER_DST"
+}
+
+setup_pam_default() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        return 0
+    fi
+
+    echo "-> Intentando habilitar PAM automáticamente..."
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        if install_pam_helper && configure_pam; then
+            echo "   PAM wiring completado."
+        else
+            echo "   WARN: no se pudo completar PAM automáticamente."
+            echo "   Ejecutá 'sudo bash install.sh --pam' para reintentar el setup PAM."
+        fi
+    else
+        echo "   WARN: sin privilegios para escribir en /usr/local/bin y /etc/pam.d."
+        echo "   Ejecutá 'sudo bash install.sh --pam' para completar el setup PAM."
+    fi
+}
+
+CONFIGURE_PAM=false
+for arg in "$@"; do
+    case "$arg" in
+        --pam) CONFIGURE_PAM=true ;;
+    esac
+done
+
+if [[ "$CONFIGURE_PAM" == true ]]; then
+    install_pam_helper
+    configure_pam
+    echo "PAM setup completado."
+    exit 0
+fi
 
 # Detectar si es primera instalacion (binario no existia antes)
 FIRST_INSTALL=false
@@ -124,6 +222,16 @@ else
 fi
 echo "   Binario instalado en $BINARY"
 
+# 4b. Build and install PAM helper (user-space copy)
+if [[ -f "$PAM_HELPER_SRC/main.go" ]]; then
+    echo "-> Instalando PAM helper en $PAM_BINARY ..."
+    go build -o "$PAM_BINARY" ./cmd/engram-pam-helper/
+    chmod 0755 "$PAM_BINARY"
+    echo "   PAM helper instalado: $PAM_BINARY"
+fi
+
+setup_pam_default
+
 # 5. Crear ~/.config/systemd/user/ si no existe
 echo "-> Verificando directorio systemd..."
 mkdir -p "$SERVICE_DIR"
@@ -136,6 +244,7 @@ Description=Engram -> Obsidian Memory Sync
 After=default.target
 
 [Service]
+Environment=ENGRAM_DATA_DIR=%h/.engram
 ExecStart=%h/.local/bin/engram-obsidian --daemon --interval 10m
 Restart=on-failure
 RestartSec=10s
@@ -196,3 +305,8 @@ if [[ "${GO_INSTALLED:-false}" == true ]]; then
     echo "IMPORTANTE: Go fue instalado. Para usarlo en esta terminal corré:"
     echo "  source $RC_FILE"
 fi
+
+echo ""
+echo "-> Pasos opcionales:"
+echo "   Corré 'engram-obsidian setup-keys' para inicializar el cifrado."
+echo "   Corré 'sudo bash install.sh --pam' para configurar el auto-unlock PAM."

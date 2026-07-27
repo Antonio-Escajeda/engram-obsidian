@@ -17,6 +17,25 @@ import (
 const version = "0.1.0"
 
 func main() {
+	// Subcommand dispatch — handled before flag.Parse() so subcommands can use
+	// their own argument parsing if needed, and to avoid flag conflicts.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "setup-keys":
+			if err := runSetupKeys(); err != nil {
+				fmt.Fprintf(os.Stderr, "setup-keys: %v\n", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "recover":
+			if err := runRecover(); err != nil {
+				fmt.Fprintf(os.Stderr, "recover: %v\n", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	}
+
 	var (
 		flagVersion       = flag.Bool("version", false, "Mostrar versión y salir")
 		flagSelect        = flag.Bool("select", false, "Forzar apertura de la TUI para cambiar la selección")

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SERVICE="engram-obsidian.service"
+SERVICE_FILE="${HOME}/.config/systemd/user/${SERVICE}"
 SELECTION_FILE="${HOME}/.engram/obsidian-selection.json"
 DEFAULT_VAULT_WSL=""
 DEFAULT_VAULT_UNIX="${HOME}/Documents/EngramVault"
@@ -48,6 +49,17 @@ else
   fail "Servicio inactivo"
 fi
 
+if [[ -f "$SERVICE_FILE" ]]; then
+  ok "Existe service file: $SERVICE_FILE"
+  if grep -q "^Environment=ENGRAM_DATA_DIR=%h/.engram$" "$SERVICE_FILE"; then
+    ok "Service define ENGRAM_DATA_DIR portable (%h/.engram)"
+  else
+    warn "Service no define ENGRAM_DATA_DIR=%h/.engram (se usará fallback del daemon)"
+  fi
+else
+  fail "No existe service file: $SERVICE_FILE"
+fi
+
 info "Revisando logs recientes"
 LOGS="$(journalctl --user -u "$SERVICE" -n 200 --no-pager || true)"
 if [[ -z "$LOGS" ]]; then
@@ -86,6 +98,13 @@ if not db_path:
 
 print(f"[OK] vault_path={vault}")
 print(f"[OK] db_path={db_path}")
+
+if db_path.startswith("/"):
+    print("[OK] db_path absoluto (compatibilidad preservada)")
+elif db_path.startswith("~/") or db_path == "~":
+    print("[OK] db_path con ~ (portable)")
+else:
+    print("[OK] db_path relativo (se resuelve contra ENGRAM_DATA_DIR)")
 
 if confirmed is True:
     print("[OK] confirmed=true")

@@ -26,7 +26,48 @@ const (
 // ErrKeyringUnavailable is returned when the Linux Keyring is not accessible.
 var ErrKeyringUnavailable = errors.New("linux keyring unavailable")
 
+// ErrLocked is returned when the keyring is empty or unavailable and no key can be loaded.
+// Callers must check with errors.Is(err, ErrLocked) — it is never wrapped.
+var ErrLocked = errors.New("engram: keyring empty — run su/sudo or engram-obsidian unlock")
+
+// LoadKey returns the derived encryption key for dbDir.
+// 1. Tries the Linux kernel keyring — if found, derives and returns.
+// 2. If keyring empty or unavailable — returns ErrLocked (unwrapped sentinel).
+// No file fallback. No key generation.
+func LoadKey(dbDir string) ([]byte, error) {
+	if !keyringAvailable() {
+		return nil, ErrLocked
+	}
+	masterKey, err := loadFromKeyring()
+	if err != nil {
+		return nil, ErrLocked
+	}
+	return deriveKey(masterKey, "engram-obsidian-v1")
+}
+
+// LoadMasterFromKeyring returns the raw masterKey from the Linux kernel keyring.
+// Used by the PAM helper which needs to re-wrap masterKey with a new password.
+// Returns ErrLocked if the keyring is empty or unavailable.
+func LoadMasterFromKeyring() ([]byte, error) {
+	if !keyringAvailable() {
+		return nil, ErrLocked
+	}
+	masterKey, err := loadFromKeyring()
+	if err != nil {
+		return nil, ErrLocked
+	}
+	return masterKey, nil
+}
+
+// StoreKeyInKeyring stores masterKey in the Linux kernel user keyring.
+// This is the public wrapper for the PAM helper and CLI subcommands.
+func StoreKeyInKeyring(masterKey []byte) error {
+	return storeInKeyring(masterKey)
+}
+
 // GetOrCreateKey obtiene o crea la clave de cifrado de 32 bytes.
+//
+// Deprecated: use LoadKey. Will be removed when daemon.go migrates.
 //
 // Estrategia:
 //  1. Si Linux Keyring disponible: intentar loadFromKeyring().
@@ -43,7 +84,14 @@ func GetOrCreateKey(dbDir string) ([]byte, error) {
 			return deriveKey(masterKey, "engram-obsidian-v1")
 		}
 
-		// Keyring disponible pero no tiene la clave — generar y almacenar
+		// Keyring disponible pero no tiene la clave — verificar si hay DB cifrada
+		// antes de generar una nueva clave (evitar orphan de datos existentes)
+		encPath := filepath.Join(dbDir, "engram.db.enc")
+		if _, statErr := os.Stat(encPath); statErr == nil {
+			return nil, fmt.Errorf("encrypted DB found but no key in keyring — key may have been lost on system restart; cannot generate new key (would orphan existing encrypted data)")
+		}
+
+		// No hay DB cifrada — generar y almacenar nueva clave
 		masterKey = make([]byte, keySize)
 		if _, err := rand.Read(masterKey); err != nil {
 			return nil, fmt.Errorf("GetOrCreateKey: generate key: %w", err)
@@ -76,7 +124,13 @@ func GetOrCreateKey(dbDir string) ([]byte, error) {
 		return nil, fmt.Errorf("key file integrity check failed — cannot recover encryption key")
 	}
 
-	// No existe key file — generar nueva clave
+	// No existe key file — verificar si hay DB cifrada antes de generar nueva clave
+	encPath := filepath.Join(dbDir, "engram.db.enc")
+	if _, statErr := os.Stat(encPath); statErr == nil {
+		return nil, fmt.Errorf("encrypted DB found but no key in keyring — key may have been lost on system restart; cannot generate new key (would orphan existing encrypted data)")
+	}
+
+	// No hay DB cifrada — generar nueva clave
 	masterKey = make([]byte, keySize)
 	if _, err := rand.Read(masterKey); err != nil {
 		return nil, fmt.Errorf("GetOrCreateKey: generate key: %w", err)
@@ -167,6 +221,13 @@ func loadFromKeyring() ([]byte, error) {
 	}
 
 	return buf[:n], nil
+}
+
+// MigrateLegacyKey loads the masterKey from the legacy .engram-key file in dbDir.
+// Used by setup-keys when migrating from the old file-based key to the PAM key slot scheme.
+// Returns an error if the file does not exist or decryption fails.
+func MigrateLegacyKey(dbDir string) ([]byte, error) {
+	return loadKeyFile(dbDir)
 }
 
 // saveKeyFile cifra masterKey con machine-derived key y la guarda en dbDir/.engram-key (0400).
