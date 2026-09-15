@@ -281,6 +281,40 @@ systemd_user_available() {
     [[ -S "$runtime_dir/bus" ]] && systemctl --user show-environment >/dev/null 2>&1
 }
 
+STATE_DIR="$HOME/.local/state/engram-obsidian"
+PID_FILE="$STATE_DIR/daemon.pid"
+LOG_FILE="$STATE_DIR/daemon.log"
+
+# Corre el daemon directo en background, sin depender de systemd --user.
+# Usado como fallback cuando no hay sesión systemd-logind (común en WSL).
+# Idempotente: si ya hay un proceso vivo apuntado por PID_FILE, lo mata antes
+# de relanzar, igual que "systemctl restart" haría con el servicio real.
+start_daemon_fallback() {
+    mkdir -p "$STATE_DIR"
+
+    if [[ -f "$PID_FILE" ]]; then
+        local old_pid
+        old_pid=$(cat "$PID_FILE" 2>/dev/null || true)
+        if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
+            echo "-> Deteniendo daemon en background anterior (pid $old_pid)..."
+            kill "$old_pid" 2>/dev/null || true
+            wait "$old_pid" 2>/dev/null || true
+        fi
+    fi
+
+    echo "-> Iniciando daemon en background (sin systemd --user)..."
+    ENGRAM_DATA_DIR="$HOME/.engram" setsid nohup "$BINARY" --daemon --interval 10m \
+        >>"$LOG_FILE" 2>&1 < /dev/null &
+    disown
+    echo $! > "$PID_FILE"
+    sleep 1
+    if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "   Daemon corriendo (pid $(cat "$PID_FILE")). Logs: $LOG_FILE"
+    else
+        echo "   ERROR: el daemon no quedó corriendo. Revisá $LOG_FILE"
+    fi
+}
+
 SYSTEMD_SERVICE_ACTIVE=false
 if systemd_user_available; then
     echo "-> Recargando systemd daemon..."
@@ -302,14 +336,16 @@ if systemd_user_available; then
 else
     echo ""
     echo "WARN: no hay sesión de usuario systemd disponible (\"loginctl list-sessions\" no muestra sesiones)."
-    echo "   El service file ya quedó escrito en $SERVICE_FILE, pero no se pudo habilitar/iniciar."
+    echo "   El service file ya quedó escrito en $SERVICE_FILE para cuando haya sesión systemd."
     echo "   Esto es común en WSL: abrir una terminal no siempre crea una sesión systemd-logind."
-    echo "   Para arreglarlo, corré:"
+    echo "   Mientras tanto, arranco el daemon directo en background:"
+    start_daemon_fallback
+    echo ""
+    echo "   Este fallback no sobrevive un reinicio de WSL ni se reinicia solo si crashea."
+    echo "   Para que el daemon dependa de systemd (auto-restart y arranque en boot), corré:"
     echo "     sudo loginctl enable-linger $(whoami)"
     echo "     sudo systemctl start user@$(id -u).service"
-    echo "   Si con eso 'systemctl --user status' sigue sin andar, cerrá WSL por completo"
-    echo "   desde Windows ('wsl --shutdown') y volvé a abrir la terminal."
-    echo "   Luego reintentá: systemctl --user daemon-reload && systemctl --user enable --now engram-obsidian"
+    echo "   y después: systemctl --user daemon-reload && systemctl --user enable --now engram-obsidian"
 fi
 
 # 11. Aviso de primera instalacion
