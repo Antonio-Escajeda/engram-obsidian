@@ -272,24 +272,45 @@ print('   Migración completada.')
     fi
 fi
 
-# 8. Reload del daemon
-echo "-> Recargando systemd daemon..."
-systemctl --user daemon-reload
+# 8. Verificar si hay sesión de usuario systemd disponible.
+# En WSL, abrir una terminal no siempre pasa por un login real (pam_systemd),
+# así que puede no existir /run/user/<uid> ni bus de sesión — sin eso,
+# "systemctl --user" siempre falla con "Failed to connect to bus".
+systemd_user_available() {
+    local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    [[ -S "$runtime_dir/bus" ]] && systemctl --user show-environment >/dev/null 2>&1
+}
 
-# 9. Habilitar/reiniciar segun estado actual
-if systemctl --user is-active --quiet engram-obsidian; then
-    echo "-> Servicio activo — reiniciando..."
-    systemctl --user restart engram-obsidian
+SYSTEMD_SERVICE_ACTIVE=false
+if systemd_user_available; then
+    echo "-> Recargando systemd daemon..."
+    systemctl --user daemon-reload
+
+    if systemctl --user is-active --quiet engram-obsidian; then
+        echo "-> Servicio activo — reiniciando..."
+        systemctl --user restart engram-obsidian
+    else
+        echo "-> Habilitando e iniciando servicio..."
+        systemctl --user enable engram-obsidian
+        systemctl --user start engram-obsidian
+    fi
+
+    echo ""
+    echo "-> Estado del servicio:"
+    systemctl --user status engram-obsidian --no-pager
+    SYSTEMD_SERVICE_ACTIVE=true
 else
-    echo "-> Habilitando e iniciando servicio..."
-    systemctl --user enable engram-obsidian
-    systemctl --user start engram-obsidian
+    echo ""
+    echo "WARN: no hay sesión de usuario systemd disponible (\"loginctl list-sessions\" no muestra sesiones)."
+    echo "   El service file ya quedó escrito en $SERVICE_FILE, pero no se pudo habilitar/iniciar."
+    echo "   Esto es común en WSL: abrir una terminal no siempre crea una sesión systemd-logind."
+    echo "   Para arreglarlo, corré:"
+    echo "     sudo loginctl enable-linger $(whoami)"
+    echo "     sudo systemctl start user@$(id -u).service"
+    echo "   Si con eso 'systemctl --user status' sigue sin andar, cerrá WSL por completo"
+    echo "   desde Windows ('wsl --shutdown') y volvé a abrir la terminal."
+    echo "   Luego reintentá: systemctl --user daemon-reload && systemctl --user enable --now engram-obsidian"
 fi
-
-# 10. Estado final
-echo ""
-echo "-> Estado del servicio:"
-systemctl --user status engram-obsidian --no-pager
 
 # 11. Aviso de primera instalacion
 echo ""
